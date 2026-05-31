@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Archive.org Uploader</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Login -->
+    <section class="card">
+      <div class="section-header">
+        <span class="section-title">Archive.org Account</span>
+        <span id="login-status" class="badge badge-dim">not signed in</span>
+      </div>
+
+      <!-- Expanded: credential entry -->
+      <div id="account-form">
+        <div class="row gap-md" style="align-items:flex-end">
+          <div class="field flex-1">
+            <label class="field-label" for="username">Username / Email</label>
+            <input type="text" id="username" class="input" placeholder="your@email.com" autocomplete="username" />
+          </div>
+          <div class="field flex-1">
+            <label class="field-label" for="password">Password</label>
+            <input type="password" id="password" class="input" placeholder="••••••••" autocomplete="current-password" />
+          </div>
+          <button id="login-btn" class="btn btn-primary">Log In</button>
+        </div>
+      </div>
+
+      <!-- Collapsed: signed-in summary -->
+      <div id="account-signedin" class="row gap-sm hidden" style="justify-content:space-between">
+        <span id="account-who" class="hint" style="margin:0"></span>
+        <button id="logout-btn" class="btn">Log Out</button>
+      </div>
+    </section>
+
+    <!-- Source files -->
+    <section class="card">
+      <div class="section-header">
+        <span class="section-title">Source</span>
+        <span id="source-count" class="badge badge-dim">no files</span>
+      </div>
+      <div class="row gap-sm">
+        <button id="pick-folder-btn" class="btn">Select Folder…</button>
+        <button id="pick-files-btn" class="btn">Select Files…</button>
+        <button id="clear-source-btn" class="btn">Clear</button>
+      </div>
+      <div id="source-list" class="source-list hidden"></div>
+    </section>
+
+    <!-- Required metadata -->
+    <section class="card">
+      <span class="section-title">Required Metadata</span>
+
+      <div class="field">
+        <label class="field-label" for="identifier">
+          Identifier
+          <span class="hint-inline">(unique, lowercase, a–z 0–9 - _ . — no spaces)</span>
+        </label>
+        <div class="row gap-sm">
+          <input type="text" id="identifier" class="input flex-1" placeholder="my-unique-item-2026" />
+          <button id="derive-id-btn" class="btn" title="Generate an identifier from the title">From Title</button>
+          <button id="check-id-btn" class="btn" title="Check if this identifier is available on archive.org">Check</button>
+        </div>
+        <p id="id-status" class="hint hidden" style="margin-top:-2px"></p>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="title">Title</label>
+        <input type="text" id="title" class="input" placeholder="A descriptive title" />
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="description">Description</label>
+        <textarea id="description" class="input textarea" placeholder="What is this item? HTML is allowed."></textarea>
+      </div>
+
+      <div class="row gap-md">
+        <div class="field flex-1">
+          <label class="field-label" for="subjects">
+            Topics <span class="hint-inline">(subject — comma separated)</span>
+          </label>
+          <input type="text" id="subjects" class="input" placeholder="music, live, 1990s" />
+        </div>
+        <div class="field flex-1">
+          <label class="field-label" for="mediatype">Media Type</label>
+          <select id="mediatype" class="input select">
+            <option value="" disabled selected>Select…</option>
+            <option value="texts">texts</option>
+            <option value="audio">audio</option>
+            <option value="movies">movies (video)</option>
+            <option value="image">image</option>
+            <option value="software">software</option>
+            <option value="data">data</option>
+            <option value="web">web</option>
+            <option value="etree">etree (live music)</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- Optional metadata (collapsible) -->
+    <section class="card">
+      <button type="button" id="optional-toggle" class="collapse-header" aria-expanded="false">
+        <span class="section-title">Optional Metadata</span>
+        <span class="chevron">▸</span>
+      </button>
+      <div id="optional-body" class="collapse-body hidden">
+        <div class="row gap-md">
+          <div class="field flex-1">
+            <label class="field-label" for="creator">Creator</label>
+            <input type="text" id="creator" class="input" placeholder="Author / artist / uploader" />
+          </div>
+          <div class="field flex-1">
+            <label class="field-label" for="collection">
+              Collection <span class="hint-inline">(valid identifier)</span>
+            </label>
+            <input type="text" id="collection" class="input" placeholder="open_source_software" />
+          </div>
+        </div>
+        <div class="row gap-md">
+          <div class="field flex-1">
+            <label class="field-label" for="date">
+              Date <span class="hint-inline">(YYYY · YYYY-MM-DD · YYYY-MM-DD HH:MM:SS)</span>
+            </label>
+            <input type="text" id="date" class="input" placeholder="2026 or 2026-05-30" />
+          </div>
+          <div class="field flex-1">
+            <label class="field-label" for="language">
+              Language <span class="hint-inline">(name or MARC code)</span>
+            </label>
+            <input type="text" id="language" class="input" placeholder="English / eng" />
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="license">License</label>
+          <select id="license" class="input select">
+            <option value="">— none —</option>
+            <option value="https://creativecommons.org/publicdomain/zero/1.0/">CC0 1.0 (Public Domain Dedication)</option>
+            <option value="https://creativecommons.org/publicdomain/mark/1.0/">Public Domain Mark 1.0</option>
+            <option value="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</option>
+            <option value="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</option>
+            <option value="https://creativecommons.org/licenses/by-nd/4.0/">CC BY-ND 4.0</option>
+            <option value="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</option>
+            <option value="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</option>
+            <option value="https://creativecommons.org/licenses/by-nc-nd/4.0/">CC BY-NC-ND 4.0</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- Queue -->
+    <section class="card">
+      <div class="section-header">
+        <span class="section-title">Upload Queue</span>
+        <div class="row gap-sm">
+          <span id="queue-count" class="badge badge-dim hidden"></span>
+          <button id="add-queue-btn" class="btn btn-primary">Add to Queue</button>
+        </div>
+      </div>
+      <div id="queue-empty" class="hint">No items queued. Fill in the fields above, select files, then Add to Queue. Items upload one at a time.</div>
+      <div id="queue-list" class="queue-list hidden"></div>
+      <div class="row gap-sm" id="queue-actions" style="display:none">
+        <button id="start-queue-btn" class="btn btn-primary">Start Upload</button>
+        <button id="stop-queue-btn" class="btn" style="display:none">Stop after current</button>
+        <button id="clear-done-btn" class="btn btn-ghost btn-sm">Clear finished</button>
+        <button id="clear-queue-btn" class="btn btn-ghost btn-sm">Clear all</button>
+      </div>
+    </section>
+
+    <!-- Log -->
+    <section class="card log-card">
+      <div class="log-header">
+        <span class="section-title">Log</span>
+        <button id="clear-log-btn" class="btn btn-ghost btn-sm">Clear</button>
+      </div>
+      <div id="log" class="log"></div>
+    </section>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>

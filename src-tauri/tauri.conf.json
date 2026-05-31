@@ -1,0 +1,40 @@
+{
+  "productName": "Archive.org Uploader",
+  "version": "0.1.0",
+  "identifier": "com.whatev-indus.archive-org-uploader",
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "title": "Archive.org Uploader",
+        "width": 780,
+        "height": 1000,
+        "minWidth": 780,
+        "maxWidth": 780,
+        "minHeight": 920,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ]
+  },
+  "build": {
+    "frontendDist": "../ui",
+    "beforeBuildCommand": "",
+    "beforeDevCommand": ""
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

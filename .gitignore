@@ -1,0 +1,12 @@
+# Rust / Cargo build artifacts
+src-tauri/target/
+
+# macOS
+.DS_Store
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Icon design sources (Affinity)
+src-tauri/icons/*.af
+*~lock~
