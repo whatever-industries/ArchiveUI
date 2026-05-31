@@ -1,5 +1,5 @@
 {
-  "productName": "Archive.org Uploader",
+  "productName": "Archive UI",
   "version": "0.1.0",
   "identifier": "com.whatev-indus.archive-org-uploader",
   "app": {
@@ -9,7 +9,7 @@
     },
     "windows": [
       {
-        "title": "Archive.org Uploader",
+        "title": "Archive UI",
         "width": 780,
         "height": 1000,
         "minWidth": 780,

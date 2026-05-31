@@ -1,0 +1,154 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create/update releases
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS_ARM
+            runs-on: macos-14
+            target: aarch64-apple-darwin
+            bundles: app
+            ext: zip
+          - platform: Windows_x64
+            runs-on: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            ext: exe
+          - platform: Windows_ARM
+            runs-on: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            bundles: nsis
+            ext: exe
+          - platform: Linux_x64
+            runs-on: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage
+            ext: Appimage
+          - platform: Linux_ARM
+            runs-on: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            bundles: appimage
+            ext: Appimage
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable + target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo registry & build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: startsWith(matrix.runs-on, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libfuse2 \
+            build-essential \
+            file \
+            desktop-file-utils
+
+      - name: Install Tauri CLI v2
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: "-"   # ad-hoc signing; replace with cert for distribution
+        run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Package & rename artifact
+        shell: bash
+        run: |
+          VERSION=$(grep '^version' src-tauri/Cargo.toml | head -1 | cut -d'"' -f2)
+          OUT="Archive-UI_v${VERSION}_${{ matrix.platform }}.${{ matrix.ext }}"
+          BASE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          case "${{ matrix.bundles }}" in
+            app)
+              APP=$(ls -d "$BASE/macos/"*.app)
+              ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT"
+              ;;
+            nsis)
+              EXE=$(ls "$BASE/nsis/"*-setup.exe)
+              cp "$EXE" "$OUT"
+              ;;
+            appimage)
+              IMG=$(ls "$BASE/appimage/"*.AppImage)
+              cp "$IMG" "$OUT"
+              ;;
+          esac
+          echo "Produced: $OUT"
+          echo "ASSET=$OUT" >> "$GITHUB_ENV"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          VERSION=$(grep '^version' src-tauri/Cargo.toml | head -1 | cut -d'"' -f2)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --target "${{ github.sha }}" \
+            --notes "Cross-platform builds for \`$TAG\` (commit ${{ github.sha }}).
+
+          | Platform | Asset |
+          | --- | --- |
+          | macOS (Apple Silicon) | \`Archive-UI_v${{ steps.ver.outputs.version }}_macOS_ARM.zip\` |
+          | Windows x64 | \`Archive-UI_v${{ steps.ver.outputs.version }}_Windows_x64.exe\` |
+          | Windows ARM | \`Archive-UI_v${{ steps.ver.outputs.version }}_Windows_ARM.exe\` |
+          | Linux x64 | \`Archive-UI_v${{ steps.ver.outputs.version }}_Linux_x64.Appimage\` |
+          | Linux ARM | \`Archive-UI_v${{ steps.ver.outputs.version }}_Linux_ARM.Appimage\` |
+
+          macOS build is ad-hoc signed — on first launch right-click → Open to bypass Gatekeeper.
+          Upload-to-archive.org requires the \`ia\` CLI (\`pip install internetarchive\`)." \
+            dist/*

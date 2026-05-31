@@ -1,4 +1,4 @@
-# Archive.org Uploader
+# Archive UI
 
 A small macOS desktop app (Tauri + Rust) for uploading items to
 [archive.org](https://archive.org) from one window — sign in, fill in the item
