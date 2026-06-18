@@ -17,15 +17,15 @@
 
       <!-- Expanded: credential entry -->
       <div id="account-form">
-        <div class="row gap-md" style="align-items:flex-end">
-          <div class="field flex-1">
-            <label class="field-label" for="username">Username / Email</label>
+        <div class="row gap-md">
+          <label class="field-inline flex-1" for="username">
+            <span class="field-label-inline">Username / Email</span>
             <input type="text" id="username" class="input" placeholder="your@email.com" autocomplete="username" />
-          </div>
-          <div class="field flex-1">
-            <label class="field-label" for="password">Password</label>
+          </label>
+          <label class="field-inline flex-1" for="password">
+            <span class="field-label-inline">Password</span>
             <input type="password" id="password" class="input" placeholder="••••••••" autocomplete="current-password" />
-          </div>
+          </label>
           <button id="login-btn" class="btn btn-primary">Log In</button>
         </div>
       </div>
@@ -56,21 +56,20 @@
       <span class="section-title">Required Metadata</span>
 
       <div class="field">
-        <label class="field-label" for="identifier">
-          Identifier
-          <span class="hint-inline">(unique, lowercase, a–z 0–9 - _ . — no spaces)</span>
-        </label>
         <div class="row gap-sm">
-          <input type="text" id="identifier" class="input flex-1" placeholder="my-unique-item-2026" />
+          <label class="field-label-inline field-label-fixed" for="identifier"
+                 title="Unique, lowercase — a–z 0–9 - _ . and no spaces">Identifier</label>
+          <input type="text" id="identifier" class="input flex-1" placeholder="my-unique-item-2026"
+                 title="Unique, lowercase — a–z 0–9 - _ . and no spaces" />
           <button id="derive-id-btn" class="btn" title="Generate an identifier from the title">From Title</button>
           <button id="check-id-btn" class="btn" title="Check if this identifier is available on archive.org">Check</button>
         </div>
         <p id="id-status" class="hint hidden" style="margin-top:-2px"></p>
       </div>
 
-      <div class="field">
-        <label class="field-label" for="title">Title</label>
-        <input type="text" id="title" class="input" placeholder="A descriptive title" />
+      <div class="row gap-sm">
+        <label class="field-label-inline field-label-fixed" for="title">Title</label>
+        <input type="text" id="title" class="input flex-1" placeholder="A descriptive title" />
       </div>
 
       <div class="field">
@@ -110,34 +109,31 @@
       </button>
       <div id="optional-body" class="collapse-body hidden">
         <div class="row gap-md">
-          <div class="field flex-1">
-            <label class="field-label" for="creator">Creator</label>
-            <input type="text" id="creator" class="input" placeholder="Author / artist / uploader" />
+          <div class="row gap-sm flex-1">
+            <label class="field-label-inline field-label-fixed" for="creator">Creator</label>
+            <input type="text" id="creator" class="input flex-1" placeholder="Author / artist / uploader" />
           </div>
-          <div class="field flex-1">
-            <label class="field-label" for="collection">
-              Collection <span class="hint-inline">(valid identifier)</span>
-            </label>
-            <input type="text" id="collection" class="input" placeholder="open_source_software" />
+          <div class="row gap-sm flex-1">
+            <label class="field-label-inline field-label-fixed" for="collection"
+                   title="Must be a valid archive.org collection identifier">Collection</label>
+            <input type="text" id="collection" class="input flex-1" placeholder="open_source_software" />
           </div>
         </div>
         <div class="row gap-md">
-          <div class="field flex-1">
-            <label class="field-label" for="date">
-              Date <span class="hint-inline">(YYYY · YYYY-MM-DD · YYYY-MM-DD HH:MM:SS)</span>
-            </label>
-            <input type="text" id="date" class="input" placeholder="2026 or 2026-05-30" />
+          <div class="row gap-sm flex-1">
+            <label class="field-label-inline field-label-fixed" for="date"
+                   title="YYYY · YYYY-MM-DD · YYYY-MM-DD HH:MM:SS">Date</label>
+            <input type="text" id="date" class="input flex-1" placeholder="2026 or 2026-05-30" />
           </div>
-          <div class="field flex-1">
-            <label class="field-label" for="language">
-              Language <span class="hint-inline">(name or MARC code)</span>
-            </label>
-            <input type="text" id="language" class="input" placeholder="English / eng" />
+          <div class="row gap-sm flex-1">
+            <label class="field-label-inline field-label-fixed" for="language"
+                   title="Language name or MARC code">Language</label>
+            <input type="text" id="language" class="input flex-1" placeholder="English / eng" />
           </div>
         </div>
-        <div class="field">
-          <label class="field-label" for="license">License</label>
-          <select id="license" class="input select">
+        <div class="row gap-sm">
+          <label class="field-label-inline field-label-fixed" for="license">License</label>
+          <select id="license" class="input select flex-1">
             <option value="">— none —</option>
             <option value="https://creativecommons.org/publicdomain/zero/1.0/">CC0 1.0 (Public Domain Dedication)</option>
             <option value="https://creativecommons.org/publicdomain/mark/1.0/">Public Domain Mark 1.0</option>

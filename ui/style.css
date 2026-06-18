@@ -73,6 +73,22 @@ html, body {
   color: var(--text-dim);
   margin-bottom: 4px;
 }
+/* Inline variant: label sits to the left of the input on one line, so the
+   field occupies a single row instead of stacking label above input. */
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.field-inline .input { flex: 1; min-width: 0; width: auto; }
+.field-label-inline {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+/* Fixed-width label so a column of single-line fields shares a left edge. */
+.field-label-fixed { width: 78px; flex: none; }
 .hint {
   font-size: 11px;
   color: var(--text-dim);
