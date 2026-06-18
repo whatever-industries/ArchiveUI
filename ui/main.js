@@ -421,6 +421,9 @@ loginBtn.addEventListener('click', async () => {
     await invoke('configure_account', { username: user, password: passwordInput.value });
     loggedIn = true;
     loggedInUser = user;
+    // Remember the working credentials so the fields are pre-filled next launch.
+    localStorage.setItem('account.username', user);
+    localStorage.setItem('account.password', passwordInput.value);
     applyLoggedInUI();        // collapses the section
     logOk('Logged in.');
   } catch (err) {
@@ -438,6 +441,9 @@ logoutBtn.addEventListener('click', () => {
   loggedIn = false;
   loggedInUser = '';
   passwordInput.value = '';
+  // Explicit sign-out forgets the saved credentials.
+  localStorage.removeItem('account.username');
+  localStorage.removeItem('account.password');
   applyLoggedInUI();          // re-expands the section
   logDim('Signed out.');
 });
@@ -552,6 +558,12 @@ if (savedMediatype && mediatypeSelect.querySelector(`option[value="${savedMediat
 mediatypeSelect.addEventListener('change', () => {
   if (mediatypeSelect.value) localStorage.setItem('mediatype', mediatypeSelect.value);
 });
+
+// ── Account — pre-fill the last working credentials for quick re-login ────────
+const savedUser = localStorage.getItem('account.username');
+const savedPass = localStorage.getItem('account.password');
+if (savedUser) usernameInput.value = savedUser;
+if (savedPass) passwordInput.value = savedPass;
 
 applyLoggedInUI();
 renderQueue();
