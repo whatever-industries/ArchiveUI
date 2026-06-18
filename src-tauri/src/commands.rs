@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -135,26 +135,82 @@ pub struct UploadMeta {
     language: String,
 }
 
-/// Confirm the `ia` CLI is installed, returning a friendly error otherwise.
-fn ensure_ia() -> Result<(), String> {
-    Command::new("ia")
+/// Locate the `ia` executable. GUI apps launched from Finder/Dock on macOS do
+/// not inherit the user's shell `PATH`, so a bare `Command::new("ia")` fails to
+/// find `ia` when it lives somewhere like `~/.local/bin` or a Homebrew prefix.
+/// Resolve the absolute path once: prefer whatever a login shell reports (it
+/// sources the user's profile and full PATH), then fall back to common install
+/// locations. Returns `None` only if `ia` genuinely can't be found.
+fn ia_bin() -> Option<&'static str> {
+    static CACHE: OnceLock<Option<String>> = OnceLock::new();
+    CACHE.get_or_init(resolve_ia).as_deref()
+}
+
+fn resolve_ia() -> Option<String> {
+    // 1. Already on PATH (e.g. `cargo tauri dev` launched from a terminal).
+    let on_path = Command::new("ia")
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map_err(|_| {
-            "The 'ia' CLI is not installed.\nInstall it with:  pip install internetarchive"
-                .to_string()
-        })?;
-    Ok(())
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if on_path {
+        return Some("ia".to_string());
+    }
+
+    // 2. Ask the user's login shell, which loads their profile and real PATH.
+    if let Ok(shell) = std::env::var("SHELL") {
+        if let Ok(out) = Command::new(&shell).args(["-lic", "command -v ia"]).output() {
+            // Profile scripts may print noise; take the last line that is a
+            // real, existing path.
+            let resolved = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .rfind(|l| Path::new(l).is_file())
+                .map(str::to_string);
+            if resolved.is_some() {
+                return resolved;
+            }
+        }
+    }
+
+    // 3. Probe common install locations directly.
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut candidates = vec![
+        format!("{home}/.local/bin/ia"),
+        "/opt/homebrew/bin/ia".to_string(),
+        "/usr/local/bin/ia".to_string(),
+        "/usr/bin/ia".to_string(),
+    ];
+    // pip `--user` installs land under ~/Library/Python/<ver>/bin on macOS.
+    if let Ok(entries) = fs::read_dir(format!("{home}/Library/Python")) {
+        for e in entries.flatten() {
+            candidates.push(e.path().join("bin").join("ia").to_string_lossy().to_string());
+        }
+    }
+    candidates.into_iter().find(|p| Path::new(p).is_file())
+}
+
+/// A `Command` for the resolved `ia` binary, or a friendly error if it's missing.
+fn ia_command() -> Result<Command, String> {
+    let bin = ia_bin().ok_or(
+        "The 'ia' CLI is not installed.\nInstall it with:  pip install internetarchive",
+    )?;
+    Ok(Command::new(bin))
+}
+
+/// Confirm the `ia` CLI can be found, returning a friendly error otherwise.
+fn ensure_ia() -> Result<(), String> {
+    ia_command().map(|_| ())
 }
 
 /// Sign in once per batch: write the archive.org S3 keys via `ia configure`.
 #[tauri::command]
 pub async fn configure_account(username: String, password: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        ensure_ia()?;
-        let cfg = Command::new("ia")
+        let cfg = ia_command()?
             .args([
                 "configure",
                 &format!("--username={}", username),
@@ -249,12 +305,11 @@ pub struct ItemInfo {
 #[tauri::command]
 pub async fn inspect_item(identifier: String) -> Result<ItemInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        ensure_ia()?;
         let id = identifier.trim();
         if id.is_empty() {
             return Err("No identifier provided.".to_string());
         }
-        let out = Command::new("ia")
+        let out = ia_command()?
             .args(["metadata", id])
             .output()
             .map_err(|e| format!("ia metadata failed: {e}"))?;
@@ -376,7 +431,7 @@ fn upload_blocking(app: &AppHandle, meta: &UploadMeta, files: &[String]) -> Resu
     args.push("--checksum".into());
     args.push("--retries=10".into());
 
-    let mut child = Command::new("ia")
+    let mut child = ia_command()?
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
