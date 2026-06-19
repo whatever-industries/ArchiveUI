@@ -413,6 +413,18 @@ fn upload_blocking(app: &AppHandle, meta: &UploadMeta, files: &[String]) -> Resu
 
     ensure_ia()?;
 
+    // Hold the system awake for the duration of the upload so a long transfer
+    // isn't cut short by the machine going to sleep. Best-effort — released
+    // automatically when this guard drops at the end of the upload.
+    let _keep_awake = keepawake::Builder::default()
+        .idle(true)
+        .sleep(true)
+        .reason("Uploading to archive.org")
+        .app_name("Archive UI")
+        .app_reverse_domain("com.whatev-indus.archive-ui")
+        .create()
+        .ok();
+
     // ── Build the metadata argument list ────────────────────────────────────────
     let mut md: Vec<String> = Vec::new();
     let mut push = |key: &str, val: &str| {
