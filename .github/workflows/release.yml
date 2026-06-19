@@ -152,3 +152,13 @@ jobs:
           macOS build is ad-hoc signed — on first launch right-click → Open to bypass Gatekeeper.
           Upload-to-archive.org requires the \`ia\` CLI (\`pip install internetarchive\`)." \
             dist/*
+
+          # Keep only the release just published; delete older builds (and their
+          # tags) to save space — this app retains a single release at a time.
+          gh release list --json tagName --jq '.[].tagName' \
+            | grep -vx "$TAG" \
+            | while read -r old; do
+                [ -n "$old" ] || continue
+                echo "Deleting old release $old"
+                gh release delete "$old" --yes --cleanup-tag
+              done

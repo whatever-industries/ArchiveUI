@@ -40,13 +40,13 @@
     <!-- Source files -->
     <section class="card">
       <div class="section-header">
-        <span class="section-title">Source</span>
+        <div class="row gap-sm">
+          <span class="section-title">Source</span>
+          <button id="pick-folder-btn" class="btn btn-sm">Select Folder…</button>
+          <button id="pick-files-btn" class="btn btn-sm">Select Files…</button>
+          <button id="clear-source-btn" class="btn btn-sm">Clear</button>
+        </div>
         <span id="source-count" class="badge badge-dim">no files</span>
-      </div>
-      <div class="row gap-sm">
-        <button id="pick-folder-btn" class="btn">Select Folder…</button>
-        <button id="pick-files-btn" class="btn">Select Files…</button>
-        <button id="clear-source-btn" class="btn">Clear</button>
       </div>
       <div id="source-list" class="source-list hidden"></div>
     </section>
@@ -78,15 +78,14 @@
       </div>
 
       <div class="row gap-md">
-        <div class="field flex-1">
-          <label class="field-label" for="subjects">
-            Topics <span class="hint-inline">(subject — comma separated)</span>
-          </label>
-          <input type="text" id="subjects" class="input" placeholder="music, live, 1990s" />
+        <div class="row gap-sm flex-1">
+          <label class="field-label-inline field-label-fixed" for="subjects"
+                 title="subject — comma separated">Topics</label>
+          <input type="text" id="subjects" class="input flex-1" placeholder="music, live, 1990s" />
         </div>
-        <div class="field flex-1">
-          <label class="field-label" for="mediatype">Media Type</label>
-          <select id="mediatype" class="input select">
+        <div class="row gap-sm flex-1">
+          <label class="field-label-inline field-label-fixed" for="mediatype">Media Type</label>
+          <select id="mediatype" class="input select flex-1">
             <option value="" disabled selected>Select…</option>
             <option value="texts">texts</option>
             <option value="audio">audio</option>
