@@ -12,6 +12,18 @@ pub fn emit_log(app: &AppHandle, msg: impl Into<String>) {
     let _ = app.emit("log", msg.into());
 }
 
+/// Stop Windows from flashing a console window open for each spawned child
+/// process (`ia`, `curl`, …). No-op on other platforms.
+fn hide_window(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 /// Tracks the in-flight `ia upload` child so it can be cancelled mid-upload.
 #[derive(Default)]
 pub struct UploadState {
@@ -31,7 +43,7 @@ pub fn cancel_upload(app: AppHandle) -> Result<(), String> {
         Some(pid) => {
             *state.cancelled.lock().unwrap() = true;
             // SIGTERM stops the `ia` python process cleanly mid-transfer.
-            let _ = Command::new("kill").arg(pid.to_string()).status();
+            let _ = hide_window(Command::new("kill").arg(pid.to_string())).status();
             Ok(())
         }
         None => Err("No upload is currently in progress.".to_string()),
@@ -148,20 +160,22 @@ fn ia_bin() -> Option<&'static str> {
 
 fn resolve_ia() -> Option<String> {
     // 1. Already on PATH (e.g. `cargo tauri dev` launched from a terminal).
-    let on_path = Command::new("ia")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+    let on_path = hide_window(
+        Command::new("ia")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )
+    .status()
+    .map(|s| s.success())
+    .unwrap_or(false);
     if on_path {
         return Some("ia".to_string());
     }
 
     // 2. Ask the user's login shell, which loads their profile and real PATH.
     if let Ok(shell) = std::env::var("SHELL") {
-        if let Ok(out) = Command::new(&shell).args(["-lic", "command -v ia"]).output() {
+        if let Ok(out) = hide_window(Command::new(&shell).args(["-lic", "command -v ia"])).output() {
             // Profile scripts may print noise; take the last line that is a
             // real, existing path.
             let resolved = String::from_utf8_lossy(&out.stdout)
@@ -198,7 +212,9 @@ fn ia_command() -> Result<Command, String> {
     let bin = ia_bin().ok_or(
         "The 'ia' CLI is not installed.\nInstall it with:  pip install internetarchive",
     )?;
-    Ok(Command::new(bin))
+    let mut cmd = Command::new(bin);
+    hide_window(&mut cmd);
+    Ok(cmd)
 }
 
 /// Confirm the `ia` CLI can be found, returning a friendly error otherwise.
@@ -254,8 +270,7 @@ pub async fn check_identifier(identifier: String) -> Result<IdentifierStatus, St
         let url = format!(
             "https://archive.org/services/check_identifier.php?identifier={id}&output=json"
         );
-        let out = Command::new("curl")
-            .args(["-sS", "--max-time", "15", &url])
+        let out = hide_window(Command::new("curl").args(["-sS", "--max-time", "15", &url]))
             .output()
             .map_err(|e| format!("Could not reach archive.org: {e}"))?;
         if !out.status.success() {
