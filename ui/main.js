@@ -321,12 +321,14 @@ function validateItem() {
 }
 
 // Clear the per-item fields after queuing, keeping account + "sticky" metadata
-// (media type, collection, license, language, creator) for the next item.
+// (collection, license, language, creator) for the next item. Media Type is
+// deliberately reset so the user must consciously pick it for every item.
 function resetItemForm() {
   identifierInput.value = '';
   titleInput.value = '';
   descriptionInput.value = '';
   subjectsInput.value = '';
+  mediatypeSelect.value = '';
   idStatus.classList.add('hidden');
   selectedFolder = '';
   selectedFiles = [];
@@ -550,14 +552,9 @@ startQueueBtn.addEventListener('click', async () => {
 
 clearLogBtn.addEventListener('click', () => { logEl.innerHTML = ''; });
 
-// ── Media Type — no preset; remember the last choice across sessions ──────────
-const savedMediatype = localStorage.getItem('mediatype');
-if (savedMediatype && mediatypeSelect.querySelector(`option[value="${savedMediatype}"]`)) {
-  mediatypeSelect.value = savedMediatype;
-}
-mediatypeSelect.addEventListener('change', () => {
-  if (mediatypeSelect.value) localStorage.setItem('mediatype', mediatypeSelect.value);
-});
+// ── Media Type — never persisted; always starts unset so the user must pick
+// it deliberately for each item (and each launch). ────────────────────────────
+localStorage.removeItem('mediatype');
 
 // ── Account — pre-fill the last working credentials for quick re-login ────────
 const savedUser = localStorage.getItem('account.username');
