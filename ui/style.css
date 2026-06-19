@@ -168,6 +168,7 @@ html, body {
 .id-ok    { color: var(--success); }
 .id-taken { color: var(--error); }
 .id-busy  { color: var(--text-dim); }
+.id-info  { color: var(--accent); }
 
 /* Queue */
 .queue-list {

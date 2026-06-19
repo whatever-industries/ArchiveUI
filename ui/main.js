@@ -189,6 +189,20 @@ function setIdStatus(text, cls) {
   idStatus.classList.remove('hidden');
 }
 
+// For the "Check" button: when an identifier is taken, find out whether the
+// signed-in account owns it (so adding files is valid). Returns null on failure.
+async function inspectOwnership(id) {
+  try {
+    const info = await invoke('inspect_item', { identifier: id });
+    if (!info.exists) return null;
+    const owner = (info.uploader || '').trim().toLowerCase();
+    const mine = (loggedInUser || '').trim().toLowerCase();
+    return { uploader: info.uploader, title: info.title, mine: !!(owner && mine && owner === mine) };
+  } catch (_) {
+    return null;
+  }
+}
+
 identifierInput.addEventListener('input', () => idStatus.classList.add('hidden'));
 identifierInput.addEventListener('blur', () => {
   if (identifierInput.value) identifierInput.value = sanitizeIdentifier(identifierInput.value);
@@ -208,7 +222,21 @@ checkIdBtn.addEventListener('click', async () => {
   checkIdBtn.disabled = true;
   try {
     const res = await invoke('check_identifier', { identifier: id });
-    setIdStatus(res.message, res.available ? 'id-ok' : 'id-taken');
+    if (res.available) {
+      setIdStatus(res.message, 'id-ok');
+    } else {
+      // Taken — but an item the signed-in account already owns is fine to add
+      // files to, so distinguish "yours" from "someone else's" instead of a
+      // blanket "not available".
+      const info = loggedInUser ? await inspectOwnership(id) : null;
+      if (info && info.mine) {
+        setIdStatus(`'${id}' already exists and is yours — uploading will add files to it.`, 'id-info');
+      } else if (info && info.uploader) {
+        setIdStatus(`'${id}' is taken (created by ${info.uploader}) — choose another, or sign in as that account to add files.`, 'id-taken');
+      } else {
+        setIdStatus(`${res.message} If it's your own item, sign in and you can add files to it.`, 'id-taken');
+      }
+    }
   } catch (err) {
     setIdStatus(`Check failed: ${err}`, 'id-taken');
   } finally {
