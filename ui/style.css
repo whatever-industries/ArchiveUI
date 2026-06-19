@@ -12,7 +12,7 @@
   --text:      #e2e4ed;
   --text-dim:  #7b8099;
   --radius:    8px;
-  --control-h: 32px;   /* shared height for buttons + single-line inputs */
+  --control-h: 28px;   /* shared height for buttons + single-line inputs */
   --font:      -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
@@ -32,10 +32,10 @@ html, body {
 .app {
   width: 100%;
   height: 100vh;
-  padding: 16px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 7px;
   overflow: hidden;
 }
 
@@ -44,10 +44,10 @@ html, body {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 14px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
@@ -118,10 +118,10 @@ html, body {
 
 .textarea {
   height: auto;
-  padding: 7px 10px;
+  padding: 6px 10px;
   resize: vertical;
-  min-height: 64px;
-  line-height: 1.5;
+  min-height: 50px;
+  line-height: 1.45;
 }
 
 .select {
@@ -261,8 +261,8 @@ html, body {
 .collapse-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 4px;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 /* Buttons */
