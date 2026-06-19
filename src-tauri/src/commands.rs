@@ -406,6 +406,56 @@ fn stream_cr_lf<R: Read>(
     }
 }
 
+/// Run a single `ia` invocation, streaming stdout as log lines and stderr's
+/// `\r`-updated progress bar as live progress events. Publishes the child PID
+/// to `UploadState` so the upload can be cancelled, then clears it on exit.
+fn run_ia_streaming(app: &AppHandle, args: &[String]) -> Result<std::process::ExitStatus, String> {
+    let mut child = ia_command()?
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn ia upload: {e}"))?;
+
+    let state = app.state::<UploadState>();
+    *state.pid.lock().unwrap() = Some(child.id());
+
+    let stdout = child.stdout.take().expect("stdout");
+    let stderr = child.stderr.take().expect("stderr");
+
+    let app_a = app.clone();
+    let t_out = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            emit_log(&app_a, line);
+        }
+    });
+    // `ia` writes status + a `\r`-updated progress bar to stderr. Surface
+    // committed lines normally, and stream the progress bar as live, in-place
+    // updates (throttled) so it doesn't look stalled then dump all at once.
+    let app_b = app.clone();
+    let t_err = std::thread::spawn(move || {
+        let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        stream_cr_lf(
+            stderr,
+            |line| {
+                let _ = app_b.emit("log", line.to_string());
+            },
+            |prog| {
+                if last.elapsed() >= std::time::Duration::from_millis(120) {
+                    let _ = app_b.emit("upload-progress", prog.to_string());
+                    last = std::time::Instant::now();
+                }
+            },
+        );
+    });
+
+    let status = child.wait().map_err(|e| format!("ia wait failed: {e}"))?;
+    t_out.join().ok();
+    t_err.join().ok();
+    *state.pid.lock().unwrap() = None;
+    Ok(status)
+}
+
 fn upload_blocking(app: &AppHandle, meta: &UploadMeta, files: &[String]) -> Result<(), String> {
     if files.is_empty() {
         return Err("No files selected to upload.".to_string());
@@ -452,75 +502,55 @@ fn upload_blocking(app: &AppHandle, meta: &UploadMeta, files: &[String]) -> Resu
     emit_log(app, format!("  mediatype  : {}", meta.mediatype));
     emit_log(app, format!("  files      : {}", files.len()));
 
-    let mut args: Vec<String> = vec!["upload".into(), meta.identifier.clone()];
-    args.extend(files.iter().cloned());
-    args.extend(md);
-    args.push("--checksum".into());
-    args.push("--retries=10".into());
-
-    let mut child = ia_command()?
-        .args(&args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn ia upload: {e}"))?;
-
-    // Publish this upload's PID so `cancel_upload` can stop it; clear the
-    // cancelled flag for a fresh run.
+    // Upload one file per `ia` invocation, sequentially, so files are never
+    // transferred in parallel. Metadata accompanies only the first file (which
+    // creates the item); later files are appended to the same identifier. Derive
+    // is deferred until the final file so the item is processed just once.
     let state = app.state::<UploadState>();
-    *state.pid.lock().unwrap() = Some(child.id());
-    *state.cancelled.lock().unwrap() = false;
+    *state.cancelled.lock().unwrap() = false; // fresh run
 
-    let stdout = child.stdout.take().expect("stdout");
-    let stderr = child.stderr.take().expect("stderr");
-
-    let app_a = app.clone();
-    let t_out = std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            emit_log(&app_a, line);
+    let total = files.len();
+    for (i, file) in files.iter().enumerate() {
+        // Honour a cancel requested between files.
+        if *state.cancelled.lock().unwrap() {
+            emit_log(app, format!("Upload of '{}' cancelled.", meta.identifier));
+            return Err("cancelled".to_string());
         }
-    });
-    // `ia` writes status + a `\r`-updated progress bar to stderr. Surface
-    // committed lines normally, and stream the progress bar as live, in-place
-    // updates (throttled) so it doesn't look stalled then dump all at once.
-    let app_b = app.clone();
-    let t_err = std::thread::spawn(move || {
-        let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
-        stream_cr_lf(
-            stderr,
-            |line| {
-                let _ = app_b.emit("log", line.to_string());
-            },
-            |prog| {
-                if last.elapsed() >= std::time::Duration::from_millis(120) {
-                    let _ = app_b.emit("upload-progress", prog.to_string());
-                    last = std::time::Instant::now();
-                }
-            },
-        );
-    });
 
-    let status = child.wait().map_err(|e| format!("ia wait failed: {e}"))?;
-    t_out.join().ok();
-    t_err.join().ok();
+        let label = Path::new(file)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(file.as_str());
+        emit_log(app, format!("[{}/{}] Uploading {}…", i + 1, total, label));
 
-    // This upload is no longer cancellable; read whether it was cancelled.
-    *state.pid.lock().unwrap() = None;
-    let was_cancelled = *state.cancelled.lock().unwrap();
+        let mut args: Vec<String> = vec!["upload".into(), meta.identifier.clone(), file.clone()];
+        if i == 0 {
+            args.extend(md.iter().cloned()); // metadata + item creation on the first file
+        }
+        args.push("--checksum".into());
+        args.push("--retries=10".into());
+        if i + 1 < total {
+            args.push("--no-derive".into()); // derive once, after the last file
+        }
 
-    if was_cancelled {
-        emit_log(app, format!("Upload of '{}' cancelled.", meta.identifier));
-        Err("cancelled".to_string())
-    } else if status.success() {
-        emit_log(
-            app,
-            format!(
-                "Upload complete!  https://archive.org/details/{}",
-                meta.identifier
-            ),
-        );
-        Ok(())
-    } else {
-        Err("Upload failed — see log for details".to_string())
+        let status = run_ia_streaming(app, &args)?;
+
+        // A cancel may have landed while this file was uploading.
+        if *state.cancelled.lock().unwrap() {
+            emit_log(app, format!("Upload of '{}' cancelled.", meta.identifier));
+            return Err("cancelled".to_string());
+        }
+        if !status.success() {
+            return Err(format!("Upload failed on '{label}' — see log for details"));
+        }
     }
+
+    emit_log(
+        app,
+        format!(
+            "Upload complete!  https://archive.org/details/{}",
+            meta.identifier
+        ),
+    );
+    Ok(())
 }
