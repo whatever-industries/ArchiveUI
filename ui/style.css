@@ -367,6 +367,8 @@ html, body {
 .log .line-error   { color: var(--error); }
 .log .line-heading { color: var(--accent); font-weight: 600; }
 .log .line-dim     { color: var(--text-dim); }
+.log .log-link     { color: var(--accent); text-decoration: underline; cursor: pointer; }
+.log .log-link:hover { color: #7eb8f7; }
 
 /* Badges */
 .badge {

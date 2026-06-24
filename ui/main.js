@@ -3,6 +3,7 @@
 const { invoke } = window.__TAURI__.core;
 const { open: openDialog, ask } = window.__TAURI__.dialog;
 const { listen } = window.__TAURI__.event;
+const { openUrl } = window.__TAURI__.opener;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -69,10 +70,29 @@ const logEl       = $('log');
 
 // ── Log helpers ───────────────────────────────────────────────────────────────
 
+// Build the line as text nodes, turning any http(s) URL into a link that opens
+// in the system browser (a bare <a href> would navigate the app's webview).
+const URL_RE = /https?:\/\/[^\s]+/g;
+function appendWithLinks(el, text) {
+  let last = 0;
+  for (const m of text.matchAll(URL_RE)) {
+    if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const url = m[0];
+    const a = document.createElement('a');
+    a.className = 'log-link';
+    a.href = url;
+    a.textContent = url;
+    a.addEventListener('click', (e) => { e.preventDefault(); openUrl(url); });
+    el.appendChild(a);
+    last = m.index + url.length;
+  }
+  if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)));
+}
+
 function logLine(text, cls = 'line-info') {
   const el = document.createElement('div');
   el.className = cls;
-  el.textContent = text;
+  appendWithLinks(el, text);
   logEl.appendChild(el);
   logEl.scrollTop = logEl.scrollHeight;
 }
