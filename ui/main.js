@@ -174,6 +174,10 @@ clearSourceBtn.addEventListener('click', () => {
 
 // ── Identifier helpers ────────────────────────────────────────────────────────
 
+// Identifier is pre-filled with this prefix for the common redump workflow;
+// the user clicks into the field and types the rest onto it.
+const ID_PREFIX = 'redump-id-';
+
 function sanitizeIdentifier(s) {
   return s
     .toLowerCase()
@@ -204,6 +208,16 @@ async function inspectOwnership(id) {
 }
 
 identifierInput.addEventListener('input', () => idStatus.classList.add('hidden'));
+// When the field still holds just the prefix, drop the caret at the end so the
+// user types straight onto it rather than into the middle of "redump-id-".
+identifierInput.addEventListener('focus', () => {
+  if (identifierInput.value === ID_PREFIX) {
+    requestAnimationFrame(() => {
+      const end = identifierInput.value.length;
+      identifierInput.setSelectionRange(end, end);
+    });
+  }
+});
 identifierInput.addEventListener('blur', () => {
   if (identifierInput.value) identifierInput.value = sanitizeIdentifier(identifierInput.value);
 });
@@ -335,7 +349,8 @@ async function cancelUpload(id) {
 
 function validateItem() {
   const missing = [];
-  if (!identifierInput.value.trim())  missing.push('Identifier');
+  const idVal = identifierInput.value.trim();
+  if (!idVal || idVal === ID_PREFIX)  missing.push('Identifier');
   if (!titleInput.value.trim())       missing.push('Title');
   if (!descriptionInput.value.trim()) missing.push('Description');
   if (!subjectsInput.value.trim())    missing.push('Topics');
@@ -353,7 +368,7 @@ function validateItem() {
 // descriptions are often reused across uploads. Media Type is deliberately
 // reset so the user must consciously pick it for every item.
 function resetItemForm() {
-  identifierInput.value = '';
+  identifierInput.value = ID_PREFIX;
   titleInput.value = '';
   subjectsInput.value = '';
   mediatypeSelect.value = '';
@@ -583,6 +598,9 @@ clearLogBtn.addEventListener('click', () => { logEl.innerHTML = ''; });
 // ── Media Type — never persisted; always starts unset so the user must pick
 // it deliberately for each item (and each launch). ────────────────────────────
 localStorage.removeItem('mediatype');
+
+// ── Identifier — start each launch pre-filled with the redump prefix ──────────
+if (!identifierInput.value) identifierInput.value = ID_PREFIX;
 
 // ── Description — persisted across launches (reused across uploads) ───────────
 const savedDescription = localStorage.getItem('description');
