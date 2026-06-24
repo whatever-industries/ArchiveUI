@@ -584,6 +584,13 @@ clearLogBtn.addEventListener('click', () => { logEl.innerHTML = ''; });
 // it deliberately for each item (and each launch). ────────────────────────────
 localStorage.removeItem('mediatype');
 
+// ── Description — persisted across launches (reused across uploads) ───────────
+const savedDescription = localStorage.getItem('description');
+if (savedDescription) descriptionInput.value = savedDescription;
+descriptionInput.addEventListener('input', () => {
+  localStorage.setItem('description', descriptionInput.value);
+});
+
 // ── Account — pre-fill the last working credentials for quick re-login ────────
 const savedUser = localStorage.getItem('account.username');
 const savedPass = localStorage.getItem('account.password');
