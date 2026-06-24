@@ -208,21 +208,27 @@ async function inspectOwnership(id) {
 }
 
 identifierInput.addEventListener('input', () => idStatus.classList.add('hidden'));
-// Clicking into an empty field drops in the "redump-id-" prefix and places the
-// caret after it, so the user just types the number. (When empty, the field
-// shows "redump-id-" as a greyed placeholder.)
+// The field is pre-filled with the real value "redump-id-" so the user just
+// types the number onto it. While it still holds only that prefix, force the
+// caret to the end so a click/selection never lands inside it and the first
+// keystroke appends rather than overwrites.
+function idCaretToEnd() {
+  const end = identifierInput.value.length;
+  identifierInput.setSelectionRange(end, end);
+}
 identifierInput.addEventListener('focus', () => {
-  if (identifierInput.value === '') identifierInput.value = ID_PREFIX;
-  if (identifierInput.value === ID_PREFIX) {
-    requestAnimationFrame(() => {
-      const end = identifierInput.value.length;
-      identifierInput.setSelectionRange(end, end);
-    });
-  }
+  if (identifierInput.value === '') identifierInput.value = ID_PREFIX; // safety if cleared
+  if (identifierInput.value === ID_PREFIX) requestAnimationFrame(idCaretToEnd);
+});
+// Runs after the browser's own click caret placement, so it reliably collapses
+// any selection and puts the caret at the end.
+identifierInput.addEventListener('click', () => {
+  if (identifierInput.value === ID_PREFIX) idCaretToEnd();
 });
 identifierInput.addEventListener('blur', () => {
-  // Left untouched (still just the prefix) → clear it so the placeholder returns.
-  if (identifierInput.value === ID_PREFIX) { identifierInput.value = ''; return; }
+  // Keep the bare prefix intact (don't let the sanitizer strip its trailing
+  // dash) so the field stays ready as "redump-id-".
+  if (identifierInput.value === ID_PREFIX) return;
   if (identifierInput.value) identifierInput.value = sanitizeIdentifier(identifierInput.value);
 });
 
@@ -372,7 +378,7 @@ function validateItem() {
 // descriptions are often reused across uploads. Media Type is deliberately
 // reset so the user must consciously pick it for every item.
 function resetItemForm() {
-  identifierInput.value = '';
+  identifierInput.value = ID_PREFIX;
   titleInput.value = '';
   subjectsInput.value = '';
   mediatypeSelect.value = '';
@@ -602,6 +608,9 @@ clearLogBtn.addEventListener('click', () => { logEl.innerHTML = ''; });
 // ── Media Type — never persisted; always starts unset so the user must pick
 // it deliberately for each item (and each launch). ────────────────────────────
 localStorage.removeItem('mediatype');
+
+// ── Identifier — start each launch with the redump prefix pre-filled ──────────
+identifierInput.value = ID_PREFIX;
 
 // ── Description — persisted across launches (reused across uploads) ───────────
 const savedDescription = localStorage.getItem('description');
