@@ -208,9 +208,11 @@ async function inspectOwnership(id) {
 }
 
 identifierInput.addEventListener('input', () => idStatus.classList.add('hidden'));
-// When the field still holds just the prefix, drop the caret at the end so the
-// user types straight onto it rather than into the middle of "redump-id-".
+// Clicking into an empty field drops in the "redump-id-" prefix and places the
+// caret after it, so the user just types the number. (When empty, the field
+// shows "redump-id-" as a greyed placeholder.)
 identifierInput.addEventListener('focus', () => {
+  if (identifierInput.value === '') identifierInput.value = ID_PREFIX;
   if (identifierInput.value === ID_PREFIX) {
     requestAnimationFrame(() => {
       const end = identifierInput.value.length;
@@ -219,6 +221,8 @@ identifierInput.addEventListener('focus', () => {
   }
 });
 identifierInput.addEventListener('blur', () => {
+  // Left untouched (still just the prefix) → clear it so the placeholder returns.
+  if (identifierInput.value === ID_PREFIX) { identifierInput.value = ''; return; }
   if (identifierInput.value) identifierInput.value = sanitizeIdentifier(identifierInput.value);
 });
 
@@ -368,7 +372,7 @@ function validateItem() {
 // descriptions are often reused across uploads. Media Type is deliberately
 // reset so the user must consciously pick it for every item.
 function resetItemForm() {
-  identifierInput.value = ID_PREFIX;
+  identifierInput.value = '';
   titleInput.value = '';
   subjectsInput.value = '';
   mediatypeSelect.value = '';
@@ -598,9 +602,6 @@ clearLogBtn.addEventListener('click', () => { logEl.innerHTML = ''; });
 // ── Media Type — never persisted; always starts unset so the user must pick
 // it deliberately for each item (and each launch). ────────────────────────────
 localStorage.removeItem('mediatype');
-
-// ── Identifier — start each launch pre-filled with the redump prefix ──────────
-if (!identifierInput.value) identifierInput.value = ID_PREFIX;
 
 // ── Description — persisted across launches (reused across uploads) ───────────
 const savedDescription = localStorage.getItem('description');
