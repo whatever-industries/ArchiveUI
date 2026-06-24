@@ -349,12 +349,12 @@ function validateItem() {
 }
 
 // Clear the per-item fields after queuing, keeping account + "sticky" metadata
-// (collection, license, language, creator) for the next item. Media Type is
-// deliberately reset so the user must consciously pick it for every item.
+// (description, collection, license, language, creator) for the next item —
+// descriptions are often reused across uploads. Media Type is deliberately
+// reset so the user must consciously pick it for every item.
 function resetItemForm() {
   identifierInput.value = '';
   titleInput.value = '';
-  descriptionInput.value = '';
   subjectsInput.value = '';
   mediatypeSelect.value = '';
   idStatus.classList.add('hidden');
