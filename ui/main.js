@@ -64,6 +64,7 @@ const startQueueBtn = $('start-queue-btn');
 const stopQueueBtn  = $('stop-queue-btn');
 const clearDoneBtn  = $('clear-done-btn');
 const clearQueueBtn = $('clear-queue-btn');
+const autoClearToggle = $('auto-clear-toggle');
 
 const clearLogBtn = $('clear-log-btn');
 const logEl       = $('log');
@@ -612,6 +613,11 @@ startQueueBtn.addEventListener('click', async () => {
       }
     }
     item.cancelRequested = false;
+    // With auto-clear on, drop successful items from the queue immediately;
+    // failures/cancellations stay visible so problems aren't hidden.
+    if (autoClearToggle.checked && item.status === 'done') {
+      queue = queue.filter((i) => i.id !== item.id);
+    }
     renderQueue();
   }
 
@@ -628,6 +634,12 @@ clearLogBtn.addEventListener('click', () => { logEl.innerHTML = ''; });
 // ── Media Type — never persisted; always starts unset so the user must pick
 // it deliberately for each item (and each launch). ────────────────────────────
 localStorage.removeItem('mediatype');
+
+// ── Queue auto-clear toggle — remember the choice across launches ─────────────
+autoClearToggle.checked = localStorage.getItem('autoClearDone') === '1';
+autoClearToggle.addEventListener('change', () => {
+  localStorage.setItem('autoClearDone', autoClearToggle.checked ? '1' : '0');
+});
 
 // ── Identifier — start each launch with the redump prefix pre-filled ──────────
 identifierInput.value = ID_PREFIX;
