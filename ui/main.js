@@ -47,8 +47,6 @@ const descriptionInput = $('description');
 const subjectsInput   = $('subjects');
 const mediatypeSelect = $('mediatype');
 
-const optionalToggle = $('optional-toggle');
-const optionalBody   = $('optional-body');
 const creatorInput    = $('creator');
 const collectionInput = $('collection');
 const dateInput       = $('date');
@@ -157,8 +155,9 @@ async function refreshSources() {
   if (resolvedFiles.length === 0) {
     sourceCount.textContent = 'no files';
     sourceCount.className = 'badge badge-dim';
-    sourceList.classList.add('hidden');
-    sourceList.innerHTML = '';
+    // Keep the reserved list area, showing a placeholder, so the card height
+    // stays fixed whether or not files are selected.
+    sourceList.innerHTML = '<div class="src-empty">No files selected yet.</div>';
   } else {
     const total = resolvedFiles.reduce((s, f) => s + f.size, 0);
     sourceCount.textContent = `${resolvedFiles.length} file${resolvedFiles.length !== 1 ? 's' : ''} · ${formatSize(total)}`;
@@ -166,7 +165,6 @@ async function refreshSources() {
     sourceList.innerHTML = resolvedFiles
       .map((f) => `<div class="src-row"><span class="src-name">${escapeHtml(f.name)}</span><span class="src-size">${formatSize(f.size)}</span></div>`)
       .join('');
-    sourceList.classList.remove('hidden');
   }
 }
 
@@ -211,7 +209,11 @@ function sanitizeIdentifier(s) {
 function setIdStatus(text, cls) {
   idStatus.textContent = text;
   idStatus.className = `hint ${cls}`;
-  idStatus.classList.remove('hidden');
+}
+// Clear the status text without collapsing the reserved line (keeps layout locked).
+function clearIdStatus() {
+  idStatus.textContent = '';
+  idStatus.className = 'hint';
 }
 
 // For the "Check" button: when an identifier is taken, find out whether the
@@ -228,7 +230,7 @@ async function inspectOwnership(id) {
   }
 }
 
-identifierInput.addEventListener('input', () => idStatus.classList.add('hidden'));
+identifierInput.addEventListener('input', () => clearIdStatus());
 // The field is pre-filled with the real value "redump-id-" so the user just
 // types the number onto it. While it still holds only that prefix, force the
 // caret to the end so a click/selection never lands inside it and the first
@@ -255,7 +257,7 @@ identifierInput.addEventListener('blur', () => {
 
 deriveIdBtn.addEventListener('click', () => {
   const id = sanitizeIdentifier(titleInput.value.trim());
-  if (id) { identifierInput.value = id; idStatus.classList.add('hidden'); }
+  if (id) { identifierInput.value = id; clearIdStatus(); }
   else logWarn('Enter a title first to derive an identifier.');
 });
 
@@ -287,13 +289,6 @@ checkIdBtn.addEventListener('click', async () => {
   } finally {
     checkIdBtn.disabled = false;
   }
-});
-
-// ── Optional section collapse ─────────────────────────────────────────────────
-
-optionalToggle.addEventListener('click', () => {
-  const open = optionalBody.classList.toggle('hidden') === false;
-  optionalToggle.setAttribute('aria-expanded', String(open));
 });
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
@@ -403,7 +398,7 @@ function resetItemForm() {
   titleInput.value = '';
   subjectsInput.value = '';
   mediatypeSelect.value = '';
-  idStatus.classList.add('hidden');
+  clearIdStatus();
   selectedFolder = '';
   selectedFiles = [];
   resolvedFiles = [];

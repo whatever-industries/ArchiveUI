@@ -8,37 +8,28 @@
 </head>
 <body>
   <div class="app">
-    <!-- Login -->
+    <div class="col col-left">
+    <!-- Login (single row: title · credentials/summary · status) -->
     <section class="card">
-      <div class="section-header">
+      <div class="row gap-md">
         <span class="section-title">Archive.org Account</span>
-        <span id="login-status" class="badge badge-dim">not signed in</span>
-      </div>
-
-      <!-- Expanded: credential entry -->
-      <div id="account-form">
-        <div class="row gap-md">
-          <label class="field-inline flex-1" for="username">
-            <span class="field-label-inline">Username / Email</span>
-            <input type="text" id="username" class="input" placeholder="your@email.com" autocomplete="username" />
-          </label>
-          <label class="field-inline flex-1" for="password">
-            <span class="field-label-inline">Password</span>
-            <input type="password" id="password" class="input" placeholder="••••••••" autocomplete="current-password" />
-          </label>
+        <!-- Signed out: credential entry -->
+        <div id="account-form" class="row gap-sm flex-1">
+          <input type="text" id="username" class="input flex-1" placeholder="Username / Email" autocomplete="username" />
+          <input type="password" id="password" class="input flex-1" placeholder="Password" autocomplete="current-password" />
           <button id="login-btn" class="btn btn-primary">Log In</button>
         </div>
-      </div>
-
-      <!-- Collapsed: signed-in summary -->
-      <div id="account-signedin" class="row gap-sm hidden" style="justify-content:space-between">
-        <span id="account-who" class="hint" style="margin:0"></span>
-        <button id="logout-btn" class="btn">Log Out</button>
+        <!-- Signed in: summary -->
+        <div id="account-signedin" class="row gap-sm flex-1 hidden" style="justify-content:space-between">
+          <span id="account-who" class="hint" style="margin:0"></span>
+          <button id="logout-btn" class="btn">Log Out</button>
+        </div>
+        <span id="login-status" class="badge badge-dim">not signed in</span>
       </div>
     </section>
 
     <!-- Source files -->
-    <section class="card">
+    <section class="card card-fill">
       <div class="section-header">
         <div class="row gap-sm">
           <span class="section-title">Source</span>
@@ -48,7 +39,7 @@
         </div>
         <span id="source-count" class="badge badge-dim">no files</span>
       </div>
-      <div id="source-list" class="source-list hidden"></div>
+      <div id="source-list" class="source-list"><div class="src-empty">No files selected yet.</div></div>
     </section>
 
     <!-- Required metadata -->
@@ -64,7 +55,7 @@
           <button id="derive-id-btn" class="btn" title="Generate an identifier from the title">From Title</button>
           <button id="check-id-btn" class="btn" title="Check if this identifier is available on archive.org">Check</button>
         </div>
-        <p id="id-status" class="hint hidden" style="margin-top:-2px"></p>
+        <p id="id-status" class="hint" style="margin-top:2px;min-height:15px"></p>
       </div>
 
       <div class="row gap-sm">
@@ -100,13 +91,10 @@
       </div>
     </section>
 
-    <!-- Optional metadata (collapsible) -->
+    <!-- Optional metadata -->
     <section class="card">
-      <button type="button" id="optional-toggle" class="collapse-header" aria-expanded="false">
-        <span class="section-title">Optional Metadata</span>
-        <span class="chevron">▸</span>
-      </button>
-      <div id="optional-body" class="collapse-body hidden">
+      <span class="section-title">Optional Metadata</span>
+      <div id="optional-body" class="collapse-body">
         <div class="row gap-md">
           <div class="row gap-sm flex-1">
             <label class="field-label-inline field-label-fixed" for="creator">Creator</label>
@@ -146,9 +134,11 @@
         </div>
       </div>
     </section>
+    </div><!-- /col-left -->
 
+    <div class="col col-right">
     <!-- Queue -->
-    <section class="card">
+    <section class="card queue-card">
       <div class="section-header">
         <span class="section-title">Upload Queue</span>
         <div class="row gap-sm">
@@ -163,7 +153,7 @@
         <button id="stop-queue-btn" class="btn" style="display:none">Stop after current</button>
         <button id="clear-done-btn" class="btn btn-ghost btn-sm">Clear finished</button>
         <button id="clear-queue-btn" class="btn btn-ghost btn-sm">Clear all</button>
-        <label class="toggle" style="margin-left:auto"
+        <label class="toggle"
                title="Remove each item from the queue as soon as it uploads successfully">
           <input type="checkbox" id="auto-clear-toggle" />
           Auto-clear successful
@@ -179,6 +169,7 @@
       </div>
       <div id="log" class="log"></div>
     </section>
+    </div><!-- /col-right -->
   </div>
 
   <script src="main.js"></script>

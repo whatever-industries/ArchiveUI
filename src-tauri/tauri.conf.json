@@ -1,6 +1,6 @@
 {
   "productName": "Archive UI",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "identifier": "com.whatev-indus.archive-ui",
   "app": {
     "withGlobalTauri": true,
@@ -10,10 +10,9 @@
     "windows": [
       {
         "title": "Archive UI",
-        "width": 780,
+        "width": 1200,
         "height": 720,
-        "minWidth": 780,
-        "maxWidth": 780,
+        "minWidth": 1180,
         "minHeight": 660,
         "resizable": true,
         "fullscreen": false,

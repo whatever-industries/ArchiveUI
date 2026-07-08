@@ -34,9 +34,37 @@ html, body {
   height: 100vh;
   padding: 12px;
   display: flex;
+  flex-direction: row;
+  gap: 10px;
+  overflow: hidden;
+}
+
+/* Two-column layout: the form on the left, queue + log on the right. */
+.col {
+  display: flex;
   flex-direction: column;
   gap: 7px;
-  overflow: hidden;
+  min-height: 0;
+}
+.col-left {
+  flex: 0 0 780px;      /* keep the form at its designed width */
+  overflow-y: auto;      /* scroll the form only if it exceeds the window */
+}
+.col-right {
+  flex: 1 1 auto;
+  min-width: 360px;
+}
+/* Right-column cards may shrink to share the height. The queue sizes to its
+   content but caps and scrolls internally when long; the log fills the rest. */
+.col-right .card { flex-shrink: 1; }
+/* This left-column card absorbs the column's spare height (so the last card's
+   bottom aligns with the log, and the extra space lands here — the Source). */
+.col-left .card-fill { flex: 1 1 auto; min-height: 0; }
+.queue-card { flex: 0 1 auto; min-height: 0; max-height: 60%; }
+.queue-card .queue-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* Card */
@@ -152,8 +180,15 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 10px;
-  max-height: 130px;
+  /* Reserved minimum so the card never collapses; grows to fill the Source
+     card (which absorbs the left column's spare height) and scrolls if long. */
+  min-height: 92px;
+  flex: 1 1 auto;
   overflow-y: auto;
+}
+.source-list .src-empty {
+  color: var(--text-dim);
+  opacity: 0.7;
 }
 .source-list .src-row {
   display: flex;
@@ -240,30 +275,11 @@ html, body {
 }
 .queue-item .q-cancel:hover { background: var(--surface); border-color: var(--warn); }
 
-/* Collapsible */
-.collapse-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  cursor: pointer;
-  padding: 0;
-  font-family: var(--font);
-}
-.collapse-header .chevron {
-  color: var(--text-dim);
-  font-size: 12px;
-  transition: transform .15s;
-}
-.collapse-header[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+/* Optional metadata body — a column of fields under the section title. */
 .collapse-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 6px;
 }
 
 /* Buttons */
@@ -332,7 +348,10 @@ html, body {
   color: var(--text-dim);
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
 }
+/* Queue action buttons wrap in the narrower right column instead of clipping. */
+#queue-actions { flex-wrap: wrap; }
 .toggle input { margin: 0; cursor: pointer; accent-color: var(--accent); }
 
 /* Actions card */
@@ -401,10 +420,13 @@ html, body {
 /* Scrollbars */
 .log::-webkit-scrollbar,
 .source-list::-webkit-scrollbar,
-.app::-webkit-scrollbar { width: 6px; }
+.queue-list::-webkit-scrollbar,
+.col-left::-webkit-scrollbar { width: 6px; }
 .log::-webkit-scrollbar-track,
 .source-list::-webkit-scrollbar-track,
-.app::-webkit-scrollbar-track { background: transparent; }
+.queue-list::-webkit-scrollbar-track,
+.col-left::-webkit-scrollbar-track { background: transparent; }
 .log::-webkit-scrollbar-thumb,
 .source-list::-webkit-scrollbar-thumb,
-.app::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.queue-list::-webkit-scrollbar-thumb,
+.col-left::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
