@@ -60,7 +60,9 @@ html, body {
 /* This left-column card absorbs the column's spare height (so the last card's
    bottom aligns with the log, and the extra space lands here — the Source). */
 .col-left .card-fill { flex: 1 1 auto; min-height: 0; }
-.queue-card { flex: 0 1 auto; min-height: 0; max-height: 60%; }
+/* Queue and Log split the right column's height evenly; each scrolls its own
+   list/body internally when its half fills up. */
+.queue-card { flex: 1 1 0; min-height: 0; }
 .queue-card .queue-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -363,10 +365,10 @@ html, body {
   gap: 8px;
 }
 
-/* Log — grows to fill leftover space when the window is tall, but keeps a
-   usable minimum height so it's never clipped when content overflows. */
+/* Log — takes an equal half of the right column alongside the queue; its body
+   scrolls internally. */
 .log-card {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   gap: 8px;
   display: flex;
