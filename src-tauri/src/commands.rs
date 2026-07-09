@@ -409,7 +409,33 @@ fn stream_cr_lf<R: Read>(
 /// Run a single `ia` invocation, streaming stdout as log lines and stderr's
 /// `\r`-updated progress bar as live progress events. Publishes the child PID
 /// to `UploadState` so the upload can be cancelled, then clears it on exit.
-fn run_ia_streaming(app: &AppHandle, args: &[String]) -> Result<std::process::ExitStatus, String> {
+/// How a committed line of `ia` output should surface in the log.
+enum IaLine {
+    Commit,
+    Progress,
+}
+
+/// Classify a line of `ia` output so the log stays uncluttered: drop noise
+/// (blank lines and the per-item `<identifier>:` echo), route tqdm progress
+/// bars to the single live progress line, and commit anything else (e.g. errors).
+fn classify_ia_line(line: &str, identifier: &str) -> Option<IaLine> {
+    let l = line.trim();
+    if l.is_empty() {
+        None
+    } else if l.contains("%|") {
+        Some(IaLine::Progress)
+    } else if l == format!("{identifier}:") {
+        None
+    } else {
+        Some(IaLine::Commit)
+    }
+}
+
+fn run_ia_streaming(
+    app: &AppHandle,
+    args: &[String],
+    identifier: &str,
+) -> Result<std::process::ExitStatus, String> {
     let mut child = ia_command()?
         .args(args)
         .stdout(Stdio::piped())
@@ -424,21 +450,35 @@ fn run_ia_streaming(app: &AppHandle, args: &[String]) -> Result<std::process::Ex
     let stderr = child.stderr.take().expect("stderr");
 
     let app_a = app.clone();
+    let id_a = identifier.to_string();
     let t_out = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            emit_log(&app_a, line);
+            match classify_ia_line(&line, &id_a) {
+                Some(IaLine::Commit) => emit_log(&app_a, line),
+                Some(IaLine::Progress) => {
+                    let _ = app_a.emit("upload-progress", line);
+                }
+                None => {}
+            }
         }
     });
     // `ia` writes status + a `\r`-updated progress bar to stderr. Surface
     // committed lines normally, and stream the progress bar as live, in-place
     // updates (throttled) so it doesn't look stalled then dump all at once.
     let app_b = app.clone();
+    let id_b = identifier.to_string();
     let t_err = std::thread::spawn(move || {
         let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
         stream_cr_lf(
             stderr,
-            |line| {
-                let _ = app_b.emit("log", line.to_string());
+            |line| match classify_ia_line(line, &id_b) {
+                Some(IaLine::Commit) => {
+                    let _ = app_b.emit("log", line.to_string());
+                }
+                Some(IaLine::Progress) => {
+                    let _ = app_b.emit("upload-progress", line.to_string());
+                }
+                None => {}
             },
             |prog| {
                 if last.elapsed() >= std::time::Duration::from_millis(120) {
@@ -533,7 +573,7 @@ fn upload_blocking(app: &AppHandle, meta: &UploadMeta, files: &[String]) -> Resu
             args.push("--no-derive".into()); // derive once, after the last file
         }
 
-        let status = run_ia_streaming(app, &args)?;
+        let status = run_ia_streaming(app, &args, &meta.identifier)?;
 
         // A cancel may have landed while this file was uploading.
         if *state.cancelled.lock().unwrap() {
