@@ -7,8 +7,7 @@ const { openUrl } = window.__TAURI__.opener;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-let selectedFolder = '';     // chosen via "Select Folder…"
-let selectedFiles = [];      // chosen via "Select Files…"
+let selectedFiles = [];      // selected files and/or folders (folders are walked by the backend)
 let resolvedFiles = [];      // flat file list resolved by the backend
 
 let queue = [];              // queued items (see makeQueueItem)
@@ -145,7 +144,7 @@ async function refreshSources() {
   try {
     resolvedFiles = await invoke('collect_sources', {
       files: selectedFiles,
-      folder: selectedFolder || null,
+      folder: null,
     });
   } catch (err) {
     resolvedFiles = [];
@@ -169,23 +168,22 @@ async function refreshSources() {
 }
 
 pickFolderBtn.addEventListener('click', async () => {
-  const selected = await openDialog({ directory: true, multiple: false, title: 'Select a folder to upload' });
+  const selected = await openDialog({ directory: true, multiple: true, title: 'Select folder(s) to upload' });
   if (!selected) return;
-  selectedFolder = selected;
-  selectedFiles = [];
+  const picked = Array.isArray(selected) ? selected : [selected];
+  selectedFiles = [...selectedFiles, ...picked];   // add to the current selection
   await refreshSources();
 });
 
 pickFilesBtn.addEventListener('click', async () => {
   const selected = await openDialog({ directory: false, multiple: true, title: 'Select file(s) to upload' });
   if (!selected) return;
-  selectedFiles = Array.isArray(selected) ? selected : [selected];
-  selectedFolder = '';
+  const picked = Array.isArray(selected) ? selected : [selected];
+  selectedFiles = [...selectedFiles, ...picked];   // add to the current selection
   await refreshSources();
 });
 
 clearSourceBtn.addEventListener('click', () => {
-  selectedFolder = '';
   selectedFiles = [];
   resolvedFiles = [];
   refreshSources();
@@ -414,7 +412,6 @@ function resetItemForm() {
   subjectsInput.value = '';
   mediatypeSelect.value = '';
   clearIdStatus();
-  selectedFolder = '';
   selectedFiles = [];
   resolvedFiles = [];
   refreshSources();
@@ -444,7 +441,7 @@ addQueueBtn.addEventListener('click', () => {
   queue.push({
     id: nextItemId++,
     meta,
-    files: resolvedFiles.map((f) => f.path),
+    files: resolvedFiles.map((f) => ({ path: f.path, remote: f.remote })),
     fileCount: resolvedFiles.length,
     totalSize: resolvedFiles.reduce((s, f) => s + f.size, 0),
     status: 'pending',

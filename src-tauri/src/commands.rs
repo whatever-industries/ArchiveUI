@@ -50,16 +50,20 @@ pub fn cancel_upload(app: AppHandle) -> Result<(), String> {
     }
 }
 
-/// A single file slated for upload, with a display name and size.
+/// A single file slated for upload: its local path, the remote name it will have
+/// on archive.org (preserving folder structure), a display name, and size.
 #[derive(Serialize)]
 pub struct FileEntry {
     path: String,
     name: String,
+    remote: String,
     size: u64,
 }
 
-/// Recursively gather files under `dir`, skipping hidden entries (e.g. .DS_Store).
-fn walk_dir(dir: &Path, out: &mut Vec<PathBuf>) {
+/// Recursively gather files under `dir` (skipping hidden entries like .DS_Store),
+/// pairing each local path with its remote name = the path relative to `base`, so
+/// the folder's structure is preserved on archive.org.
+fn walk_dir(dir: &Path, base: &Path, out: &mut Vec<(PathBuf, String)>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -72,52 +76,63 @@ fn walk_dir(dir: &Path, out: &mut Vec<PathBuf>) {
             continue;
         }
         if path.is_dir() {
-            walk_dir(&path, out);
+            walk_dir(&path, base, out);
         } else if path.is_file() {
-            out.push(path);
+            let remote = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push((path, remote));
         }
     }
 }
 
-/// Resolve the source selection (a folder and/or an explicit file list) into a
-/// flat, de-duplicated list of files to upload, with display metadata.
+/// Resolve the source selection into a de-duplicated list of files to upload.
+/// Folders keep their structure (remote name = path relative to the folder's
+/// parent, so the folder name is retained); standalone files use their basename.
 #[tauri::command]
 pub fn collect_sources(files: Vec<String>, folder: Option<String>) -> Result<Vec<FileEntry>, String> {
-    let mut paths: Vec<PathBuf> = Vec::new();
+    // (local path, remote name)
+    let mut items: Vec<(PathBuf, String)> = Vec::new();
 
     if let Some(folder) = folder.as_ref().filter(|f| !f.trim().is_empty()) {
         let dir = Path::new(folder);
         if !dir.is_dir() {
             return Err(format!("Not a folder: {folder}"));
         }
-        walk_dir(dir, &mut paths);
+        walk_dir(dir, dir.parent().unwrap_or(dir), &mut items);
     }
 
     for f in files {
         let p = PathBuf::from(&f);
-        // A path may be a folder (e.g. dragged-and-dropped) — walk it — or a file.
         if p.is_dir() {
-            walk_dir(&p, &mut paths);
+            // Keep the folder name plus its internal structure.
+            let base = p.parent().map(|b| b.to_path_buf()).unwrap_or_else(|| p.clone());
+            walk_dir(&p, &base, &mut items);
         } else if p.is_file() {
-            paths.push(p);
-        }
-    }
-
-    paths.sort();
-    paths.dedup();
-
-    let entries = paths
-        .into_iter()
-        .map(|p| {
-            let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-            let name = p
+            let remote = p
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
+            items.push((p, remote));
+        }
+    }
+
+    // De-duplicate by local path, then sort by remote name for a tidy display.
+    items.sort_by(|a, b| a.0.cmp(&b.0));
+    items.dedup_by(|a, b| a.0 == b.0);
+    items.sort_by(|a, b| a.1.cmp(&b.1));
+
+    let entries = items
+        .into_iter()
+        .map(|(p, remote)| {
+            let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
             FileEntry {
                 path: p.to_string_lossy().to_string(),
-                name,
+                name: remote.clone(),
+                remote,
                 size,
             }
         })
@@ -358,11 +373,19 @@ pub async fn inspect_item(identifier: String) -> Result<ItemInfo, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// A file to upload: its local path plus the remote name it should have on
+/// archive.org (which preserves any folder structure).
+#[derive(Deserialize)]
+pub struct UploadFile {
+    path: String,
+    remote: String,
+}
+
 #[tauri::command]
 pub async fn upload_to_archive(
     app: AppHandle,
     meta: UploadMeta,
-    files: Vec<String>,
+    files: Vec<UploadFile>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || upload_blocking(&app, &meta, &files))
         .await
@@ -499,7 +522,7 @@ fn run_ia_streaming(
     Ok(status)
 }
 
-fn upload_blocking(app: &AppHandle, meta: &UploadMeta, files: &[String]) -> Result<(), String> {
+fn upload_blocking(app: &AppHandle, meta: &UploadMeta, files: &[UploadFile]) -> Result<(), String> {
     if files.is_empty() {
         return Err("No files selected to upload.".to_string());
     }
@@ -560,16 +583,15 @@ fn upload_blocking(app: &AppHandle, meta: &UploadMeta, files: &[String]) -> Resu
             return Err("cancelled".to_string());
         }
 
-        let label = Path::new(file)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(file.as_str());
+        let label = file.remote.as_str();
         emit_log(app, format!("[{}/{}] Uploading {}…", i + 1, total, label));
 
-        let mut args: Vec<String> = vec!["upload".into(), meta.identifier.clone(), file.clone()];
+        let mut args: Vec<String> = vec!["upload".into(), meta.identifier.clone(), file.path.clone()];
         if i == 0 {
             args.extend(md.iter().cloned()); // metadata + item creation on the first file
         }
+        // Preserve the file's folder structure under this remote name.
+        args.push(format!("--remote-name={}", file.remote));
         args.push("--checksum".into());
         args.push("--retries=10".into());
         if i + 1 < total {
