@@ -191,6 +191,21 @@ clearSourceBtn.addEventListener('click', () => {
   refreshSources();
 });
 
+// Drag & drop: dropping files/folders anywhere on the window adds them to the
+// Source list. The Source box highlights while dragging to show it's the target.
+// (Tauri intercepts OS file drops as tauri://drag-* events; dropped folders are
+// walked by the backend's collect_sources.)
+listen('tauri://drag-enter', () => sourceList.classList.add('drop-hover'));
+listen('tauri://drag-over',  () => sourceList.classList.add('drop-hover'));
+listen('tauri://drag-leave', () => sourceList.classList.remove('drop-hover'));
+listen('tauri://drag-drop', (event) => {
+  sourceList.classList.remove('drop-hover');
+  const paths = (event.payload && event.payload.paths) || [];
+  if (paths.length === 0) return;
+  selectedFiles = [...selectedFiles, ...paths];
+  refreshSources();
+});
+
 // ── Identifier helpers ────────────────────────────────────────────────────────
 
 // Identifier is pre-filled with this prefix for the common redump workflow;

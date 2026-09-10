@@ -95,7 +95,10 @@ pub fn collect_sources(files: Vec<String>, folder: Option<String>) -> Result<Vec
 
     for f in files {
         let p = PathBuf::from(&f);
-        if p.is_file() {
+        // A path may be a folder (e.g. dragged-and-dropped) — walk it — or a file.
+        if p.is_dir() {
+            walk_dir(&p, &mut paths);
+        } else if p.is_file() {
             paths.push(p);
         }
     }

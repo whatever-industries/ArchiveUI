@@ -192,6 +192,11 @@ html, body {
   color: var(--text-dim);
   opacity: 0.7;
 }
+/* Highlight the Source drop zone while files are dragged over the window. */
+.source-list.drop-hover {
+  border-color: var(--accent);
+  background: rgba(79, 142, 247, 0.08);
+}
 .source-list .src-row {
   display: flex;
   justify-content: space-between;
