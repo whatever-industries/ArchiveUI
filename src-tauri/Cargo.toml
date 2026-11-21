@@ -2,7 +2,7 @@
 name = "archive-ui"
 version = "1.0.0"
 edition = "2021"
-license = "GPL-2.0-only"
+license = "MIT"
 
 [lib]
 name = "archive_ui_lib"

@@ -55,4 +55,4 @@ cargo tauri build
 
 ## License
 
-Licensed under the [GNU General Public License v2.0](LICENSE).
+Licensed under the [MIT License](LICENSE).
