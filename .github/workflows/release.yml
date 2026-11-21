@@ -135,20 +135,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v${{ steps.ver.outputs.version }}"
+          VER="${{ steps.ver.outputs.version }}"
+          TAG="v${VER}"
+          BASE="https://github.com/whatever-industries/ArchiveUI/releases/download/${TAG}"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
-            --title "$TAG" \
+            --title "Archive UI $TAG" \
             --target "${{ github.sha }}" \
             --notes "Cross-platform builds for \`$TAG\` (commit ${{ github.sha }}).
 
-          | Platform | Asset |
-          | --- | --- |
-          | macOS (Apple Silicon) | \`Archive-UI_v${{ steps.ver.outputs.version }}_macOS_ARM.zip\` |
-          | Windows x64 | \`Archive-UI_v${{ steps.ver.outputs.version }}_Windows_x64.exe\` |
-          | Windows ARM | \`Archive-UI_v${{ steps.ver.outputs.version }}_Windows_ARM.exe\` |
-          | Linux x64 | \`Archive-UI_v${{ steps.ver.outputs.version }}_Linux_x64.Appimage\` |
-          | Linux ARM | \`Archive-UI_v${{ steps.ver.outputs.version }}_Linux_ARM.Appimage\` |
+          ## Download
+
+          | Platform |
+          |----------|
+          | [**macOS (Apple Silicon)**](${BASE}/Archive-UI_v${VER}_macOS_ARM.zip) |
+          | [**Windows (x64)**](${BASE}/Archive-UI_v${VER}_Windows_x64.exe) |
+          | [**Windows (ARM)**](${BASE}/Archive-UI_v${VER}_Windows_ARM.exe) |
+          | [**Linux (x64)**](${BASE}/Archive-UI_v${VER}_Linux_x64.Appimage) |
+          | [**Linux (ARM)**](${BASE}/Archive-UI_v${VER}_Linux_ARM.Appimage) |
+
+          ---
 
           macOS build is ad-hoc signed — on first launch right-click → Open to bypass Gatekeeper.
           Upload-to-archive.org requires the \`ia\` CLI (\`pip install internetarchive\`)." \

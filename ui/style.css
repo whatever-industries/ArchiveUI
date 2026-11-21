@@ -150,7 +150,7 @@ html, body {
   height: auto;
   padding: 6px 10px;
   resize: vertical;
-  min-height: 50px;
+  min-height: 96px;
   line-height: 1.45;
 }
 
