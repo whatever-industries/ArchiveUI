@@ -15,9 +15,9 @@
         <span class="section-title">Archive.org Account</span>
         <!-- Signed out: credential entry -->
         <div id="account-form" class="row gap-sm flex-1">
-          <input type="text" id="username" class="input flex-1" placeholder="Username / Email" autocomplete="username" />
+          <input type="text" id="username" class="input flex-1" placeholder="archive.org email" autocomplete="username" />
           <input type="password" id="password" class="input flex-1" placeholder="Password" autocomplete="current-password" />
-          <button id="login-btn" class="btn btn-primary">Log In</button>
+          <button id="login-btn" class="btn btn-primary btn-stable"><span>Log In</span><span>Signing in…</span></button>
         </div>
         <!-- Signed in: summary -->
         <div id="account-signedin" class="row gap-sm flex-1 hidden" style="justify-content:space-between">
@@ -165,7 +165,10 @@
     <section class="card log-card">
       <div class="log-header">
         <span class="section-title">Log</span>
-        <button id="clear-log-btn" class="btn btn-ghost btn-sm">Clear</button>
+        <div class="row gap-sm">
+          <button id="update-btn" class="btn btn-primary btn-sm hidden" title="Download and install the latest Archive UI, then relaunch">Update</button>
+          <button id="clear-log-btn" class="btn btn-ghost btn-sm">Clear</button>
+        </div>
       </div>
       <div id="log" class="log"></div>
     </section>

@@ -47,7 +47,7 @@ html, body {
   min-height: 0;
 }
 .col-left {
-  flex: 0 0 780px;      /* keep the form at its designed width */
+  flex: 0 0 700px;      /* keep the form at its designed width */
   overflow-y: auto;      /* scroll the form only if it exceeds the window */
 }
 .col-right {
@@ -320,6 +320,14 @@ html, body {
   border-color: #3a3d52;
 }
 .btn:active:not(:disabled) { opacity: .8; }
+
+/* Button whose label swaps (idle ↔ busy) without changing width: both labels
+   share one grid cell, so the button always sizes to the wider one. */
+.btn-stable { display: inline-grid; justify-items: center; }
+.btn-stable > span { grid-area: 1 / 1; }
+.btn-stable > span:last-child,
+.btn-stable.busy > span:first-child { visibility: hidden; }
+.btn-stable.busy > span:last-child { visibility: visible; }
 .btn:disabled { opacity: .35; cursor: not-allowed; }
 
 .btn-primary {

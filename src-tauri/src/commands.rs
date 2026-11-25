@@ -1,9 +1,10 @@
+use crate::archive::{self, PutError, S3Keys};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -12,43 +13,65 @@ pub fn emit_log(app: &AppHandle, msg: impl Into<String>) {
     let _ = app.emit("log", msg.into());
 }
 
-/// Stop Windows from flashing a console window open for each spawned child
-/// process (`ia`, `curl`, …). No-op on other platforms.
-fn hide_window(cmd: &mut Command) -> &mut Command {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    cmd
+/// Live, in-place progress line in the UI log (replaced on each update).
+pub fn emit_progress(app: &AppHandle, msg: impl Into<String>) {
+    let _ = app.emit("upload-progress", msg.into());
 }
 
-/// Tracks the in-flight `ia upload` child so it can be cancelled mid-upload.
+pub fn human_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let units = ["KB", "MB", "GB", "TB"];
+    let mut n = bytes as f64 / 1024.0;
+    let mut i = 0;
+    while n >= 1024.0 && i < units.len() - 1 {
+        n /= 1024.0;
+        i += 1;
+    }
+    if n >= 10.0 {
+        format!("{n:.0} {}", units[i])
+    } else {
+        format!("{n:.1} {}", units[i])
+    }
+}
+
+// ── Session state ──────────────────────────────────────────────────────────────
+
+/// The signed-in account's upload keys, held in memory for this session only.
+#[derive(Default)]
+pub struct AuthState {
+    keys: Mutex<Option<S3Keys>>,
+}
+
+/// Tracks the in-flight upload so it can be cancelled mid-transfer.
 #[derive(Default)]
 pub struct UploadState {
-    /// PID of the running upload, if any.
-    pid: Mutex<Option<u32>>,
-    /// Set when the user cancels, so the upload result is reported as cancelled
-    /// rather than a generic failure.
-    cancelled: Mutex<bool>,
+    active: AtomicBool,
+    cancel: AtomicBool,
 }
 
-/// Kill the in-flight upload, if one is running.
+/// Clears `active` when an upload ends, however it ends.
+struct ActiveGuard<'a>(&'a AtomicBool);
+impl Drop for ActiveGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Abort the in-flight upload, if one is running.
 #[tauri::command]
 pub fn cancel_upload(app: AppHandle) -> Result<(), String> {
     let state = app.state::<UploadState>();
-    let pid = *state.pid.lock().unwrap();
-    match pid {
-        Some(pid) => {
-            *state.cancelled.lock().unwrap() = true;
-            // SIGTERM stops the `ia` python process cleanly mid-transfer.
-            let _ = hide_window(Command::new("kill").arg(pid.to_string())).status();
-            Ok(())
-        }
-        None => Err("No upload is currently in progress.".to_string()),
+    if state.active.load(Ordering::SeqCst) {
+        state.cancel.store(true, Ordering::SeqCst);
+        Ok(())
+    } else {
+        Err("No upload is currently in progress.".to_string())
     }
 }
+
+// ── Sources ────────────────────────────────────────────────────────────────────
 
 /// A single file slated for upload: its local path, the remote name it will have
 /// on archive.org (preserving folder structure), a display name, and size.
@@ -141,7 +164,96 @@ pub fn collect_sources(files: Vec<String>, folder: Option<String>) -> Result<Vec
     Ok(entries)
 }
 
-// ── Upload ──────────────────────────────────────────────────────────────────────
+// ── Account ────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct SignInResult {
+    screenname: String,
+}
+
+/// Sign in to archive.org and keep the account's upload keys for this session.
+#[tauri::command]
+pub async fn sign_in(app: AppHandle, email: String, password: String) -> Result<SignInResult, String> {
+    let login = tauri::async_runtime::spawn_blocking(move || archive::login(email.trim(), &password))
+        .await
+        .map_err(|e| e.to_string())??;
+    *app.state::<AuthState>().keys.lock().unwrap() = Some(login.keys);
+    Ok(SignInResult { screenname: login.screenname })
+}
+
+/// Forget the session's upload keys.
+#[tauri::command]
+pub fn sign_out(app: AppHandle) {
+    *app.state::<AuthState>().keys.lock().unwrap() = None;
+}
+
+// ── Identifier / item lookups ──────────────────────────────────────────────────
+
+/// Whether an identifier is free to use on archive.org.
+#[derive(Serialize)]
+pub struct IdentifierStatus {
+    available: bool,
+    message: String,
+}
+
+/// Probe archive.org's identifier-availability service (the one the web
+/// uploader uses — it correctly reports reserved-but-unpublished identifiers as
+/// taken, which a plain metadata lookup does not).
+#[tauri::command]
+pub async fn check_identifier(identifier: String) -> Result<IdentifierStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = identifier.trim();
+        if id.is_empty() {
+            return Err("Enter an identifier first.".to_string());
+        }
+        let (available, message) = archive::check_identifier(id)?;
+        let message = message.map(|m| format!("'{id}': {m}")).unwrap_or_else(|| {
+            if available {
+                format!("'{id}' is available.")
+            } else {
+                format!("'{id}' is not available — choose another.")
+            }
+        });
+        Ok(IdentifierStatus { available, message })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Ownership details for a pre-existing archive.org item.
+#[derive(Serialize)]
+pub struct ItemInfo {
+    exists: bool,
+    /// Email of the account that created the item ("" if unknown / not exposed).
+    uploader: String,
+    title: String,
+}
+
+/// Look up an existing item's owner so the UI can confirm the signed-in account
+/// matches before adding files to it (`metadata.uploader` is the creator's email).
+#[tauri::command]
+pub async fn inspect_item(identifier: String) -> Result<ItemInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = identifier.trim();
+        if id.is_empty() {
+            return Err("No identifier provided.".to_string());
+        }
+        let json = archive::item_metadata(id)?;
+        let meta = &json["metadata"];
+        // A populated `metadata` object means the item already exists.
+        let exists = meta.as_object().is_some_and(|o| !o.is_empty());
+        let field = |k: &str| meta[k].as_str().unwrap_or("").to_string();
+        Ok(ItemInfo {
+            exists,
+            uploader: field("uploader"),
+            title: field("title"),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ── Upload ─────────────────────────────────────────────────────────────────────
 
 /// Metadata for an archive.org item, mirrored from the UI form.
 #[derive(Deserialize)]
@@ -165,214 +277,6 @@ pub struct UploadMeta {
     language: String,
 }
 
-/// Locate the `ia` executable. GUI apps launched from Finder/Dock on macOS do
-/// not inherit the user's shell `PATH`, so a bare `Command::new("ia")` fails to
-/// find `ia` when it lives somewhere like `~/.local/bin` or a Homebrew prefix.
-/// Resolve the absolute path once: prefer whatever a login shell reports (it
-/// sources the user's profile and full PATH), then fall back to common install
-/// locations. Returns `None` only if `ia` genuinely can't be found.
-fn ia_bin() -> Option<&'static str> {
-    static CACHE: OnceLock<Option<String>> = OnceLock::new();
-    CACHE.get_or_init(resolve_ia).as_deref()
-}
-
-fn resolve_ia() -> Option<String> {
-    // 1. Already on PATH (e.g. `cargo tauri dev` launched from a terminal).
-    let on_path = hide_window(
-        Command::new("ia")
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null()),
-    )
-    .status()
-    .map(|s| s.success())
-    .unwrap_or(false);
-    if on_path {
-        return Some("ia".to_string());
-    }
-
-    // 2. Ask the user's login shell, which loads their profile and real PATH.
-    if let Ok(shell) = std::env::var("SHELL") {
-        if let Ok(out) = hide_window(Command::new(&shell).args(["-lic", "command -v ia"])).output() {
-            // Profile scripts may print noise; take the last line that is a
-            // real, existing path.
-            let resolved = String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .rfind(|l| Path::new(l).is_file())
-                .map(str::to_string);
-            if resolved.is_some() {
-                return resolved;
-            }
-        }
-    }
-
-    // 3. Probe common install locations directly.
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut candidates = vec![
-        format!("{home}/.local/bin/ia"),
-        "/opt/homebrew/bin/ia".to_string(),
-        "/usr/local/bin/ia".to_string(),
-        "/usr/bin/ia".to_string(),
-    ];
-    // pip `--user` installs land under ~/Library/Python/<ver>/bin on macOS.
-    if let Ok(entries) = fs::read_dir(format!("{home}/Library/Python")) {
-        for e in entries.flatten() {
-            candidates.push(e.path().join("bin").join("ia").to_string_lossy().to_string());
-        }
-    }
-    candidates.into_iter().find(|p| Path::new(p).is_file())
-}
-
-/// A `Command` for the resolved `ia` binary, or a friendly error if it's missing.
-fn ia_command() -> Result<Command, String> {
-    let bin = ia_bin().ok_or(
-        "The 'ia' CLI is not installed.\nInstall it with:  pip install internetarchive",
-    )?;
-    let mut cmd = Command::new(bin);
-    hide_window(&mut cmd);
-    Ok(cmd)
-}
-
-/// Confirm the `ia` CLI can be found, returning a friendly error otherwise.
-fn ensure_ia() -> Result<(), String> {
-    ia_command().map(|_| ())
-}
-
-/// Sign in once per batch: write the archive.org S3 keys via `ia configure`.
-#[tauri::command]
-pub async fn configure_account(username: String, password: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cfg = ia_command()?
-            .args([
-                "configure",
-                &format!("--username={}", username),
-                &format!("--password={}", password),
-            ])
-            .output()
-            .map_err(|e| format!("ia configure failed: {e}"))?;
-        if cfg.status.success() {
-            Ok(())
-        } else {
-            Err(format!(
-                "Sign-in failed: {}",
-                String::from_utf8_lossy(&cfg.stderr).trim()
-            ))
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Whether an identifier is free to use on archive.org.
-#[derive(Serialize)]
-pub struct IdentifierStatus {
-    available: bool,
-    message: String,
-}
-
-/// Probe archive.org for an identifier using the same availability service the
-/// web uploader uses. `ia metadata` is unreliable here — it returns `{}` for
-/// reserved-but-unpublished identifiers (e.g. `test`), which the dedicated
-/// endpoint correctly reports as taken:
-///
-///   check_identifier.php?identifier=<id>  →  {"code":"available"|"not_available", ...}
-#[tauri::command]
-pub async fn check_identifier(identifier: String) -> Result<IdentifierStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let id = identifier.trim();
-        if id.is_empty() {
-            return Err("Enter an identifier first.".to_string());
-        }
-        let url = format!(
-            "https://archive.org/services/check_identifier.php?identifier={id}&output=json"
-        );
-        let out = hide_window(Command::new("curl").args(["-sS", "--max-time", "15", &url]))
-            .output()
-            .map_err(|e| format!("Could not reach archive.org: {e}"))?;
-        if !out.status.success() {
-            return Err(format!(
-                "Lookup failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ));
-        }
-
-        let body = String::from_utf8_lossy(&out.stdout);
-        let json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|_| format!("Unexpected response from archive.org: {}", body.trim()))?;
-        let code = json.get("code").and_then(|c| c.as_str()).unwrap_or("");
-        let available = code == "available";
-
-        // Prefer the service's own message; fall back to a sensible default.
-        let message = json
-            .get("message")
-            .and_then(|m| m.as_str())
-            .map(|m| format!("'{id}': {m}"))
-            .unwrap_or_else(|| {
-                if available {
-                    format!("'{id}' is available.")
-                } else {
-                    format!("'{id}' is not available — choose another.")
-                }
-            });
-
-        Ok(IdentifierStatus { available, message })
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Ownership details for a pre-existing archive.org item.
-#[derive(Serialize)]
-pub struct ItemInfo {
-    exists: bool,
-    /// Email of the account that created the item ("" if unknown / not exposed).
-    uploader: String,
-    title: String,
-}
-
-/// Look up an existing item's owner so the UI can confirm the signed-in account
-/// matches before adding files to it. Uses `ia metadata`, whose `metadata.uploader`
-/// field carries the creating account's email.
-#[tauri::command]
-pub async fn inspect_item(identifier: String) -> Result<ItemInfo, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let id = identifier.trim();
-        if id.is_empty() {
-            return Err("No identifier provided.".to_string());
-        }
-        let out = ia_command()?
-            .args(["metadata", id])
-            .output()
-            .map_err(|e| format!("ia metadata failed: {e}"))?;
-        if !out.status.success() {
-            return Err(format!(
-                "Lookup failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ));
-        }
-        let body = String::from_utf8_lossy(&out.stdout);
-        let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-        let meta = json.get("metadata");
-        // A populated `metadata` object means the item already exists.
-        let exists = meta.map(|m| m.as_object().is_some_and(|o| !o.is_empty())).unwrap_or(false);
-        let field = |k: &str| {
-            meta.and_then(|m| m.get(k))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string()
-        };
-        Ok(ItemInfo {
-            exists,
-            uploader: field("uploader"),
-            title: field("title"),
-        })
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 /// A file to upload: its local path plus the remote name it should have on
 /// archive.org (which preserves any folder structure).
 #[derive(Deserialize)]
@@ -392,142 +296,43 @@ pub async fn upload_to_archive(
         .map_err(|e| e.to_string())?
 }
 
-/// Read a child stream, treating `\n` as a committed line and `\r` as an
-/// in-place progress update (the convention CLI progress bars like `ia`'s use).
-fn stream_cr_lf<R: Read>(
-    reader: R,
-    mut on_line: impl FnMut(&str),
-    mut on_progress: impl FnMut(&str),
-) {
-    let mut reader = BufReader::new(reader);
-    let mut buf: Vec<u8> = Vec::new();
-    let mut byte = [0u8; 1];
-    let flush = |buf: &[u8]| String::from_utf8_lossy(buf).trim_end().to_string();
+/// Retries per file on transient failures (archive.org answers `503 SlowDown`
+/// when it's busy) — matches the old `ia upload --retries=10`.
+const MAX_RETRIES: u32 = 10;
 
-    while let Ok(n) = reader.read(&mut byte) {
-        if n == 0 {
-            break;
+/// Sleep for `secs`, waking early (returning false) if the upload is cancelled.
+fn wait_or_cancel(secs: u64, cancel: &AtomicBool) -> bool {
+    let until = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < until {
+        if cancel.load(Ordering::SeqCst) {
+            return false;
         }
-        match byte[0] {
-            b'\n' => {
-                let s = flush(&buf);
-                if !s.is_empty() {
-                    on_line(&s);
-                }
-                buf.clear();
-            }
-            b'\r' => {
-                let s = flush(&buf);
-                if !s.is_empty() {
-                    on_progress(&s);
-                }
-                buf.clear();
-            }
-            b => buf.push(b),
-        }
+        std::thread::sleep(Duration::from_millis(200));
     }
-    let s = flush(&buf);
-    if !s.is_empty() {
-        on_line(&s);
-    }
-}
-
-/// Run a single `ia` invocation, streaming stdout as log lines and stderr's
-/// `\r`-updated progress bar as live progress events. Publishes the child PID
-/// to `UploadState` so the upload can be cancelled, then clears it on exit.
-/// How a committed line of `ia` output should surface in the log.
-enum IaLine {
-    Commit,
-    Progress,
-}
-
-/// Classify a line of `ia` output so the log stays uncluttered: drop noise
-/// (blank lines and the per-item `<identifier>:` echo), route tqdm progress
-/// bars to the single live progress line, and commit anything else (e.g. errors).
-fn classify_ia_line(line: &str, identifier: &str) -> Option<IaLine> {
-    let l = line.trim();
-    if l.is_empty() {
-        None
-    } else if l.contains("%|") {
-        Some(IaLine::Progress)
-    } else if l == format!("{identifier}:") {
-        None
-    } else {
-        Some(IaLine::Commit)
-    }
-}
-
-fn run_ia_streaming(
-    app: &AppHandle,
-    args: &[String],
-    identifier: &str,
-) -> Result<std::process::ExitStatus, String> {
-    let mut child = ia_command()?
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn ia upload: {e}"))?;
-
-    let state = app.state::<UploadState>();
-    *state.pid.lock().unwrap() = Some(child.id());
-
-    let stdout = child.stdout.take().expect("stdout");
-    let stderr = child.stderr.take().expect("stderr");
-
-    let app_a = app.clone();
-    let id_a = identifier.to_string();
-    let t_out = std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            match classify_ia_line(&line, &id_a) {
-                Some(IaLine::Commit) => emit_log(&app_a, line),
-                Some(IaLine::Progress) => {
-                    let _ = app_a.emit("upload-progress", line);
-                }
-                None => {}
-            }
-        }
-    });
-    // `ia` writes status + a `\r`-updated progress bar to stderr. Surface
-    // committed lines normally, and stream the progress bar as live, in-place
-    // updates (throttled) so it doesn't look stalled then dump all at once.
-    let app_b = app.clone();
-    let id_b = identifier.to_string();
-    let t_err = std::thread::spawn(move || {
-        let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
-        stream_cr_lf(
-            stderr,
-            |line| match classify_ia_line(line, &id_b) {
-                Some(IaLine::Commit) => {
-                    let _ = app_b.emit("log", line.to_string());
-                }
-                Some(IaLine::Progress) => {
-                    let _ = app_b.emit("upload-progress", line.to_string());
-                }
-                None => {}
-            },
-            |prog| {
-                if last.elapsed() >= std::time::Duration::from_millis(120) {
-                    let _ = app_b.emit("upload-progress", prog.to_string());
-                    last = std::time::Instant::now();
-                }
-            },
-        );
-    });
-
-    let status = child.wait().map_err(|e| format!("ia wait failed: {e}"))?;
-    t_out.join().ok();
-    t_err.join().ok();
-    *state.pid.lock().unwrap() = None;
-    Ok(status)
+    !cancel.load(Ordering::SeqCst)
 }
 
 fn upload_blocking(app: &AppHandle, meta: &UploadMeta, files: &[UploadFile]) -> Result<(), String> {
     if files.is_empty() {
         return Err("No files selected to upload.".to_string());
     }
+    let keys = app
+        .state::<AuthState>()
+        .keys
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("Sign in to your archive.org account before uploading.")?;
 
-    ensure_ia()?;
+    let state = app.state::<UploadState>();
+    state.cancel.store(false, Ordering::SeqCst);
+    state.active.store(true, Ordering::SeqCst);
+    let _active = ActiveGuard(&state.active);
+    let cancel = &state.cancel;
+    let cancelled = || {
+        emit_log(app, format!("Upload of '{}' cancelled.", meta.identifier));
+        Err("cancelled".to_string())
+    };
 
     // Hold the system awake for the duration of the upload so a long transfer
     // isn't cut short by the machine going to sleep. Best-effort — released
@@ -541,81 +346,126 @@ fn upload_blocking(app: &AppHandle, meta: &UploadMeta, files: &[UploadFile]) -> 
         .create()
         .ok();
 
-    // ── Build the metadata argument list ────────────────────────────────────────
-    let mut md: Vec<String> = Vec::new();
-    let mut push = |key: &str, val: &str| {
-        if !val.trim().is_empty() {
-            md.push(format!("--metadata={key}:{}", val.trim()));
-        }
-    };
-    push("mediatype", &meta.mediatype);
-    push("title", &meta.title);
-    push("description", &meta.description);
-    push("creator", &meta.creator);
-    push("collection", &meta.collection);
-    push("date", &meta.date);
-    push("licenseurl", &meta.license_url);
-    push("language", &meta.language);
-    // Each subject becomes its own --metadata so `ia` stores them as an array.
-    for s in &meta.subjects {
-        if !s.trim().is_empty() {
-            md.push(format!("--metadata=subject:{}", s.trim()));
-        }
-    }
-
-    emit_log(app, format!("Uploading to archive.org as '{}'…", meta.identifier));
-    emit_log(app, format!("  identifier : {}", meta.identifier));
+    let id = meta.identifier.as_str();
+    emit_log(app, format!("Uploading to archive.org as '{id}'…"));
+    emit_log(app, format!("  identifier : {id}"));
     emit_log(app, format!("  mediatype  : {}", meta.mediatype));
     emit_log(app, format!("  files      : {}", files.len()));
 
-    // Upload one file per `ia` invocation, sequentially, so files are never
-    // transferred in parallel. Metadata accompanies only the first file (which
-    // creates the item); later files are appended to the same identifier. Derive
-    // is deferred until the final file so the item is processed just once.
-    let state = app.state::<UploadState>();
-    *state.cancelled.lock().unwrap() = false; // fresh run
-
-    let total = files.len();
-    for (i, file) in files.iter().enumerate() {
-        // Honour a cancel requested between files.
-        if *state.cancelled.lock().unwrap() {
-            emit_log(app, format!("Upload of '{}' cancelled.", meta.identifier));
-            return Err("cancelled".to_string());
+    // ── Skip files already in the item (same name, size and MD5) ────────────────
+    let existing = archive::existing_files(id).unwrap_or_else(|e| {
+        emit_log(app, format!("  (could not list existing files: {e} — uploading everything)"));
+        Default::default()
+    });
+    let mut plan: Vec<(&UploadFile, u64)> = Vec::new();
+    for f in files {
+        let size = fs::metadata(&f.path)
+            .map_err(|e| format!("Cannot read {}: {e}", f.path))?
+            .len();
+        if let Some((remote_size, remote_md5)) = existing.get(&f.remote) {
+            if *remote_size == size {
+                emit_progress(app, format!("Verifying {}…", f.remote));
+                match archive::md5_file(Path::new(&f.path), cancel) {
+                    Ok(md5) if &md5 == remote_md5 => {
+                        emit_log(app, format!("  {} is already on archive.org — skipped", f.remote));
+                        continue;
+                    }
+                    Ok(_) => {}
+                    Err(_) if cancel.load(Ordering::SeqCst) => return cancelled(),
+                    Err(e) => return Err(e),
+                }
+            }
         }
+        plan.push((f, size));
+    }
+    if plan.is_empty() {
+        emit_log(app, "All files are already on archive.org — nothing to upload.");
+        emit_log(app, format!("Upload complete!  https://archive.org/details/{id}"));
+        return Ok(());
+    }
 
+    // ── Metadata (sent with the first file, which creates the item) ─────────────
+    let mut fields: Vec<(&str, &str)> = vec![
+        ("mediatype", &meta.mediatype),
+        ("title", &meta.title),
+        ("description", &meta.description),
+        ("creator", &meta.creator),
+        ("collection", &meta.collection),
+        ("date", &meta.date),
+        ("licenseurl", &meta.license_url),
+        ("language", &meta.language),
+    ];
+    for s in &meta.subjects {
+        fields.push(("subject", s)); // repeated → stored as an array
+    }
+    let scanner = format!("Archive UI {}", env!("CARGO_PKG_VERSION"));
+    fields.push(("scanner", &scanner));
+    let meta_headers = archive::metadata_headers(&fields);
+    let total_bytes: u64 = plan.iter().map(|(_, s)| s).sum();
+
+    // Upload one file at a time. Derive (archive.org's post-processing) is
+    // queued only with the final file so the item is processed just once.
+    let n = plan.len();
+    for (i, (file, size)) in plan.iter().enumerate() {
+        if cancel.load(Ordering::SeqCst) {
+            return cancelled();
+        }
         let label = file.remote.as_str();
-        emit_log(app, format!("[{}/{}] Uploading {}…", i + 1, total, label));
+        emit_log(app, format!("[{}/{}] Uploading {} ({})…", i + 1, n, label, human_size(*size)));
 
-        let mut args: Vec<String> = vec!["upload".into(), meta.identifier.clone(), file.path.clone()];
+        let mut headers: Vec<(String, String)> = vec![
+            ("x-archive-auto-make-bucket".into(), "1".into()),
+            ("x-archive-queue-derive".into(), if i + 1 < n { "0" } else { "1" }.into()),
+            (
+                "x-archive-size-hint".into(),
+                if i == 0 { total_bytes } else { *size }.to_string(),
+            ),
+        ];
         if i == 0 {
-            args.extend(md.iter().cloned()); // metadata + item creation on the first file
-        }
-        // Preserve the file's folder structure under this remote name.
-        args.push(format!("--remote-name={}", file.remote));
-        args.push("--checksum".into());
-        args.push("--retries=10".into());
-        if i + 1 < total {
-            args.push("--no-derive".into()); // derive once, after the last file
+            headers.extend(meta_headers.iter().cloned());
         }
 
-        let status = run_ia_streaming(app, &args, &meta.identifier)?;
+        let mut attempt = 0;
+        loop {
+            let started = Instant::now();
+            let mut last = Instant::now() - Duration::from_secs(1);
+            let mut on_progress = |sent: u64| {
+                if last.elapsed() < Duration::from_millis(150) && sent < *size {
+                    return;
+                }
+                last = Instant::now();
+                let pct = if *size == 0 { 100 } else { sent * 100 / size };
+                let secs = started.elapsed().as_secs_f64().max(0.001);
+                let rate = human_size((sent as f64 / secs) as u64);
+                emit_progress(
+                    app,
+                    format!("  {label}  {pct:>3}%  ·  {} / {}  ·  {rate}/s", human_size(sent), human_size(*size)),
+                );
+            };
 
-        // A cancel may have landed while this file was uploading.
-        if *state.cancelled.lock().unwrap() {
-            emit_log(app, format!("Upload of '{}' cancelled.", meta.identifier));
-            return Err("cancelled".to_string());
-        }
-        if !status.success() {
-            return Err(format!("Upload failed on '{label}' — see log for details"));
+            match archive::put_file(&keys, id, Path::new(&file.path), label, *size, &headers, cancel, &mut on_progress) {
+                Ok(()) => break,
+                Err(PutError::Cancelled) => return cancelled(),
+                Err(PutError::Fatal(msg)) => {
+                    emit_log(app, format!("  error: {msg}"));
+                    return Err(format!("Upload failed on '{label}': {msg}"));
+                }
+                Err(PutError::Retry(msg)) => {
+                    attempt += 1;
+                    if attempt > MAX_RETRIES {
+                        emit_log(app, format!("  error: {msg}"));
+                        return Err(format!("Upload failed on '{label}' after {MAX_RETRIES} retries: {msg}"));
+                    }
+                    let wait = (5u64 << (attempt - 1).min(3)).min(30); // 5, 10, 20, 30, 30…
+                    emit_log(app, format!("  {msg} — retrying in {wait}s ({attempt}/{MAX_RETRIES})"));
+                    if !wait_or_cancel(wait, cancel) {
+                        return cancelled();
+                    }
+                }
+            }
         }
     }
 
-    emit_log(
-        app,
-        format!(
-            "Upload complete!  https://archive.org/details/{}",
-            meta.identifier
-        ),
-    );
+    emit_log(app, format!("Upload complete!  https://archive.org/details/{id}"));
     Ok(())
 }

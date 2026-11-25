@@ -15,8 +15,9 @@ let nextItemId = 1;
 let processing = false;      // queue is actively uploading
 let stopRequested = false;   // stop after the current item finishes
 
-let loggedIn = false;        // credentials verified via ia configure
-let loggedInUser = '';       // username/email of the signed-in account
+let loggedIn = false;        // credentials verified with archive.org
+let loggedInUser = '';       // email of the signed-in account
+let loggedInName = '';       // archive.org screen name
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ const clearQueueBtn = $('clear-queue-btn');
 const autoClearToggle = $('auto-clear-toggle');
 
 const clearLogBtn = $('clear-log-btn');
+const updateBtn   = $('update-btn');
 const logEl       = $('log');
 
 // ── Log helpers ───────────────────────────────────────────────────────────────
@@ -372,7 +374,7 @@ function removeFromQueue(id) {
   renderQueue();
 }
 
-// Cancel the in-flight upload: flag the item and kill the `ia` process. The
+// Cancel the in-flight upload: flag the item and abort the transfer. The
 // upload loop's catch block then marks it 'cancelled' and moves on.
 async function cancelUpload(id) {
   const item = queue.find((i) => i.id === id);
@@ -482,7 +484,9 @@ function applyLoggedInUI() {
   if (loggedIn) {
     accountForm.classList.add('hidden');
     accountSignedin.classList.remove('hidden');
-    accountWho.textContent = `Signed in as ${loggedInUser}`;
+    accountWho.textContent = loggedInName && loggedInName.toLowerCase() !== loggedInUser.toLowerCase()
+      ? `Signed in as ${loggedInName} (${loggedInUser})`
+      : `Signed in as ${loggedInUser}`;
     setAccountStatus('signed in', 'badge-ok');
   } else {
     accountForm.classList.remove('hidden');
@@ -494,16 +498,17 @@ function applyLoggedInUI() {
 loginBtn.addEventListener('click', async () => {
   const user = usernameInput.value.trim();
   if (!user || !passwordInput.value.trim()) {
-    logError('Enter your archive.org username and password.');
+    logError('Enter your archive.org email and password.');
     return;
   }
   loginBtn.disabled = true;
-  loginBtn.textContent = 'Signing in…';
+  loginBtn.classList.add('busy');
   setAccountStatus('signing in…', 'badge-info');
   try {
-    await invoke('configure_account', { username: user, password: passwordInput.value });
+    const res = await invoke('sign_in', { email: user, password: passwordInput.value });
     loggedIn = true;
     loggedInUser = user;
+    loggedInName = (res && res.screenname) || '';
     // Remember the working credentials so the fields are pre-filled next launch.
     localStorage.setItem('account.username', user);
     localStorage.setItem('account.password', passwordInput.value);
@@ -515,7 +520,7 @@ loginBtn.addEventListener('click', async () => {
     logError(String(err));
   } finally {
     loginBtn.disabled = false;
-    loginBtn.textContent = 'Log In';
+    loginBtn.classList.remove('busy');
   }
 });
 
@@ -523,6 +528,8 @@ logoutBtn.addEventListener('click', () => {
   if (processing) { logWarn('Cannot log out while the queue is uploading.'); return; }
   loggedIn = false;
   loggedInUser = '';
+  loggedInName = '';
+  invoke('sign_out');
   passwordInput.value = '';
   // Explicit sign-out forgets the saved credentials.
   localStorage.removeItem('account.username');
@@ -666,3 +673,32 @@ if (savedPass) passwordInput.value = savedPass;
 
 applyLoggedInUI();
 renderQueue();
+
+// ── App updates — check once on launch; offer a button if a newer build exists ─
+updateBtn.addEventListener('click', async () => {
+  if (processing) { logWarn('Finish or stop the upload queue before updating.'); return; }
+  updateBtn.disabled = true;
+  updateBtn.textContent = 'Updating…';
+  try {
+    await invoke('install_update'); // relaunches the app when done
+  } catch (err) {
+    logError(String(err));
+    updateBtn.disabled = false;
+    updateBtn.textContent = 'Update';
+  }
+});
+
+(async () => {
+  try {
+    const v = await window.__TAURI__.app.getVersion();
+    logDim(`Archive UI v${v}`);
+  } catch (_) { /* non-essential */ }
+  try {
+    const upd = await invoke('check_for_update');
+    if (upd) {
+      updateBtn.textContent = `Update to v${upd.version}`;
+      updateBtn.classList.remove('hidden');
+      logOk(`Archive UI v${upd.version} is available — click "Update to v${upd.version}" above the log.`);
+    }
+  } catch (_) { /* offline or no release feed yet — stay quiet */ }
+})();

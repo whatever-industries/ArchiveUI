@@ -1,6 +1,6 @@
 {
   "productName": "Archive UI",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "identifier": "com.whatev-indus.archive-ui",
   "app": {
     "withGlobalTauri": true,
@@ -10,9 +10,9 @@
     "windows": [
       {
         "title": "Archive UI",
-        "width": 1200,
+        "width": 1120,
         "height": 800,
-        "minWidth": 1180,
+        "minWidth": 1100,
         "minHeight": 720,
         "resizable": true,
         "fullscreen": false,
@@ -34,6 +34,18 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2QzA3MTQzM0U0QzBBOTMKUldTVENrdytRM0hBOXJkaDE2bE1sc0NTdm5jNmQ4bzBRUlB2RzFrOHozWG41aXQzUVZlQ29VYXEK",
+      "endpoints": [
+        "https://github.com/whatever-industries/ArchiveUI/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

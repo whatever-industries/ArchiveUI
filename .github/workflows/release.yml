@@ -80,6 +80,9 @@ jobs:
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: "-"   # ad-hoc signing; replace with cert for distribution
+          # Signs the in-app updater bundles (verified against the pubkey in tauri.conf.json).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: Package & rename artifact
@@ -88,28 +91,43 @@ jobs:
           VERSION=$(grep '^version' src-tauri/Cargo.toml | head -1 | cut -d'"' -f2)
           OUT="Archive-UI_v${VERSION}_${{ matrix.platform }}.${{ matrix.ext }}"
           BASE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          # UPD = the file the in-app updater downloads; its .sig is kept aside
+          # (named after the platform) so the release job can build latest.json.
           case "${{ matrix.bundles }}" in
             app)
               APP=$(ls -d "$BASE/macos/"*.app)
               ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT"
+              UPD="Archive-UI_v${VERSION}_${{ matrix.platform }}.app.tar.gz"
+              cp "$(ls "$BASE/macos/"*.app.tar.gz)" "$UPD"
+              cp "$(ls "$BASE/macos/"*.app.tar.gz.sig)" "${{ matrix.platform }}.sig"
               ;;
             nsis)
               EXE=$(ls "$BASE/nsis/"*-setup.exe)
               cp "$EXE" "$OUT"
+              UPD="$OUT"
+              cp "$EXE.sig" "${{ matrix.platform }}.sig"
               ;;
             appimage)
               IMG=$(ls "$BASE/appimage/"*.AppImage)
               cp "$IMG" "$OUT"
+              UPD="$OUT"
+              cp "$IMG.sig" "${{ matrix.platform }}.sig"
               ;;
           esac
-          echo "Produced: $OUT"
-          echo "ASSET=$OUT" >> "$GITHUB_ENV"
+          echo "${{ matrix.platform }}=$UPD" > "${{ matrix.platform }}.upd"
+          echo "Produced: $OUT (updater: $UPD)"
+          {
+            echo "ASSETS<<EOF"
+            printf '%s\n' "$OUT" "${{ matrix.platform }}.sig" "${{ matrix.platform }}.upd"
+            [ "$UPD" != "$OUT" ] && echo "$UPD"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}
-          path: ${{ env.ASSET }}
+          path: ${{ env.ASSETS }}
           if-no-files-found: error
 
   release:
@@ -130,6 +148,25 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Build updater manifest (latest.json)
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          BASE="https://github.com/whatever-industries/ArchiveUI/releases/download/v${VER}"
+          entry() {  # <platform> <updater-target>
+            FILE=$(cut -d= -f2- "dist/$1.upd")
+            jq -n --arg url "$BASE/$FILE" --rawfile sig "dist/$1.sig" '{($ARGS.named.t): {signature: $sig, url: $url}}' --arg t "$2"
+          }
+          {
+            entry macOS_ARM   darwin-aarch64
+            entry Windows_x64 windows-x86_64
+            entry Windows_ARM windows-aarch64
+            entry Linux_x64   linux-x86_64
+            entry Linux_ARM   linux-aarch64
+          } | jq -s --arg v "$VER" --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '{version: $v, notes: "Archive UI v\($v)", pub_date: $d, platforms: add}' > dist/latest.json
+          rm dist/*.sig dist/*.upd
+          cat dist/latest.json
 
       - name: Publish to GitHub Releases
         env:
@@ -157,7 +194,7 @@ jobs:
           ---
 
           macOS build is ad-hoc signed — on first launch right-click → Open to bypass Gatekeeper.
-          Upload-to-archive.org requires the \`ia\` CLI (\`pip install internetarchive\`)." \
+          Installed copies update themselves from inside the app." \
             dist/*
 
           # Keep only the release just published; delete older builds (and their
